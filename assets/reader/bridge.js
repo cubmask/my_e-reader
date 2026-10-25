@@ -1,6 +1,7 @@
 // Connects foliate-js to the Flutter app. Dart calls the window.reader
 // functions; this script reports back through flutter_inappwebview handlers.
 import './foliate/view.js'
+import { makeExtraBook } from './formats.js'
 
 const send = (name, data) =>
     window.flutter_inappwebview?.callHandler(name, data)
@@ -55,6 +56,12 @@ const makeTextBook = (text, title) => {
     }
 }
 
+// Picks the loader by file extension; archives call back in for the book inside.
+const makeBook = async (blob, name) => {
+    if (/\.txt$/i.test(name)) return makeTextBook(await blob.text(), name.replace(/\.txt$/i, ''))
+    return await makeExtraBook(blob, name, makeBook) ?? new File([blob], name)
+}
+
 const flattenToc = (items, depth = 0, out = []) => {
     for (const item of items ?? []) {
         out.push({ label: (item.label ?? '').trim(), href: item.href ?? '', depth })
@@ -91,9 +98,7 @@ window.reader = {
             style = { ...style, theme: theme ?? style.theme, fontSize: fontSize ?? style.fontSize }
             document.documentElement.style.setProperty('--bg', themes[style.theme].bg)
             const blob = await (await fetch(url)).blob()
-            const book = format === 'txt'
-                ? makeTextBook(await blob.text(), name.replace(/\.txt$/i, ''))
-                : new File([blob], name)
+            const book = await makeBook(blob, name)
             view = document.createElement('foliate-view')
             document.body.append(view)
             await view.open(book)

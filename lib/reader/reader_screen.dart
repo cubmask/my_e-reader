@@ -12,7 +12,7 @@ import 'reader_services.dart';
 import 'reader_settings.dart';
 import 'web_book_view.dart';
 
-/// Formats the web reader (foliate-js) opens in this phase.
+/// Formats the web reader opens: foliate-js plus our DjVu and archive loaders.
 const _webFormats = {
   BookFormat.epub,
   BookFormat.mobi,
@@ -20,6 +20,10 @@ const _webFormats = {
   BookFormat.fb2,
   BookFormat.txt,
   BookFormat.cbz,
+  BookFormat.cbr,
+  BookFormat.zip,
+  BookFormat.rar,
+  BookFormat.djvu,
 };
 
 bool isReadable(BookFormat format) =>
@@ -132,8 +136,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Widget _buildBody(bool spread) {
     if (!isReadable(book.format)) {
       return _Notice(
-        '${book.format.label} support arrives in a later phase. '
-        'This phase reads EPUB, MOBI, AZW3, FB2, TXT, CBZ and PDF.',
+        '${book.format.label} files open once office document support '
+        'arrives in phase 4.',
       );
     }
     if (_error != null) return _Notice('Could not open this book.\n$_error');
