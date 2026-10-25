@@ -1,0 +1,1 @@
+foliate-js commit 78914aef4466eb960965702401634c2cb348e9b1 (MIT), https://github.com/johnfactotum/foliate-js. PDF support (pdf.js) is omitted; PDFs use the native PDFium viewer.

@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../drive/drive_auth.dart';
 import '../drive/drive_library_source.dart';
+import '../reader/reader_services.dart';
 import 'book.dart';
 import 'library_source.dart';
 
@@ -15,19 +16,27 @@ typedef SourceFactory = LibrarySource Function(
   String folderId,
 );
 
+typedef ServicesFactory = Future<ReaderServices> Function(http.Client client);
+
 LibrarySource _driveSource(http.Client client, String folderId) =>
     DriveLibrarySource(drive.DriveApi(client), rootFolderId: folderId);
 
 /// Owns sign-in, the chosen library folder and the list of books.
 class LibraryController extends ChangeNotifier {
-  LibraryController({required this._auth, this._sourceFactory = _driveSource});
+  LibraryController({
+    required this._auth,
+    this._sourceFactory = _driveSource,
+    this._servicesFactory = ReaderServices.create,
+  });
 
   static const _folderKey = 'library.folderId';
 
   final DriveAuth _auth;
   final SourceFactory _sourceFactory;
+  final ServicesFactory _servicesFactory;
 
   http.Client? _client;
+  ReaderServices? _services;
   String? _folderId;
   LibraryStatus _status = LibraryStatus.signedOut;
   List<Book> _books = const [];
@@ -38,10 +47,14 @@ class LibraryController extends ChangeNotifier {
   String? get error => _error;
   String? get folderId => _folderId;
 
+  /// Book cache, progress and reader settings; set once signed in.
+  ReaderServices? get services => _services;
+
   Future<void> signIn() async {
     _set(LibraryStatus.loading);
     try {
-      _client = await _auth.signIn();
+      final client = _client = await _auth.signIn();
+      _services = await _servicesFactory(client);
       final prefs = await SharedPreferences.getInstance();
       _folderId = prefs.getString(_folderKey);
       if (_folderId == null) {
@@ -56,7 +69,9 @@ class LibraryController extends ChangeNotifier {
 
   Future<void> signOut() async {
     await _auth.signOut();
+    await _services?.progress.flush();
     _client = null;
+    _services = null;
     _books = const [];
     _set(LibraryStatus.signedOut);
   }
@@ -80,6 +95,7 @@ class LibraryController extends ChangeNotifier {
     if (client == null || folderId == null) return;
     _set(LibraryStatus.loading);
     try {
+      await _services?.progress.sync();
       _books = await _sourceFactory(client, folderId).listBooks();
       _set(LibraryStatus.ready);
     } catch (e) {
