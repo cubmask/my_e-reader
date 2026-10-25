@@ -9,14 +9,19 @@ The full architecture and roadmap are in the
 
 ## Status
 
-Phase 0 (foundations):
+Phase 1 (MVP reader) adds:
 
-- Adaptive shell: extended navigation rail on tablets and desktops, bottom bar on phones.
-- Google sign-in (google_sign_in on Android, iOS, macOS; browser sign-in on Windows).
-- Library screen listing every supported book in the chosen Drive folder and its subfolders, with search and format filters.
-- Format detection for EPUB, MOBI, AZW3, FB2, TXT, DOC, DOCX, RTF, ODT, PDF, DjVu, CBZ, CBR, ZIP and RAR, each mapped to its reading engine.
+- Books download from Drive on first open and stay cached for offline reading (2 GB, least recently opened evicted first).
+- EPUB, MOBI, AZW3, FB2, TXT and CBZ open in a foliate-js reader inside a WebView, with tap zones, keyboard paging, contents, light/sepia/dark themes and text size.
+- PDF opens in a native PDFium viewer.
+- On a landscape tablet or desktop, books and PDFs show as two-page spreads.
+- Reading position saves on every page turn and syncs to a hidden `progress.json` in Drive's app data folder, so every device resumes at the same place.
 
-Opening a book shows a placeholder until the reading engines land in phase 1.
+Phase 0 laid the groundwork: the adaptive shell, Google sign-in, the Drive library with search and format filters, and format detection for every planned type.
+
+DjVu, CBR, RAR, ZIP and the office formats show a "later phase" notice for now.
+
+The reader page (`assets/reader/`) bundles [foliate-js](https://github.com/johnfactotum/foliate-js) (MIT, see `assets/reader/foliate/VERSION`) and is served from a loopback-only server with a random path token. A Content Security Policy blocks scripts inside books.
 
 ## Google Cloud setup (one time)
 

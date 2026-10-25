@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import '../core/book_format.dart';
 import '../library/book.dart';
 import '../library/library_controller.dart';
-import 'reader_screen.dart';
+import '../reader/reader_screen.dart';
+import '../reader/reader_services.dart';
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key, required this.controller});
@@ -122,7 +123,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 mainAxisSpacing: 24,
               ),
               itemCount: shown.length,
-              itemBuilder: (context, i) => _BookCard(book: shown[i]),
+              itemBuilder: (context, i) => _BookCard(
+                book: shown[i],
+                services: widget.controller.services,
+              ),
             ),
           ),
         ],
@@ -132,17 +136,23 @@ class _LibraryScreenState extends State<LibraryScreen> {
 }
 
 class _BookCard extends StatelessWidget {
-  const _BookCard({required this.book});
+  const _BookCard({required this.book, required this.services});
 
   final Book book;
+  final ReaderServices? services;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return InkWell(
       borderRadius: BorderRadius.circular(8),
-      onTap: () => Navigator.of(context)
-          .push(MaterialPageRoute(builder: (_) => ReaderScreen(book: book))),
+      onTap: services == null
+          ? null
+          : () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => ReaderScreen(book: book, services: services!),
+              ),
+            ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
