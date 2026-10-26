@@ -49,7 +49,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   double? _download;
   String? _error;
   bool _controls = true;
-  late String _title = widget.book.displayTitle;
+  late String _title = services.meta.titleOf(widget.book);
   List<TocItem> _toc = const [];
   double _fraction = 0;
   String _chapter = '';
@@ -340,8 +340,16 @@ class _ReaderScreenState extends State<ReaderScreen> {
           final a = annotations.byLocation(book.driveFileId, cfi);
           if (a != null) _openAnnotation(a);
         },
-        onOpened: (title, toc) => setState(() {
-          _title = title;
+        onOpened: (title, author, toc) => setState(() {
+          // A converted document's title is its temporary copy's name.
+          if (!book.format.needsConversion) {
+            services.meta.fillIn(
+              book.driveFileId,
+              title: title,
+              author: author,
+            );
+          }
+          _title = services.meta.titleOf(book);
           _toc = toc;
           _controls = false;
           SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);

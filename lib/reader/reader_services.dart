@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../library/book_meta_store.dart';
 import '../notes/annotation_store.dart';
 import 'book_cache.dart';
 import 'progress_store.dart';
@@ -17,6 +18,7 @@ class ReaderServices {
     required this.cache,
     required this.progress,
     required this.annotations,
+    required this.meta,
     required this.server,
     required this.settings,
   });
@@ -24,6 +26,7 @@ class ReaderServices {
   final BookCache cache;
   final ProgressStore progress;
   final AnnotationStore annotations;
+  final BookMetaStore meta;
   final ReaderServer server;
   final ReaderSettings settings;
 
@@ -40,12 +43,17 @@ class ReaderServices {
         File(p.join(dir.path, 'annotations.json')),
         DriveAppDataRemote(api, 'annotations.json'),
       ),
+      meta: BookMetaStore(
+        File(p.join(dir.path, 'library.json')),
+        DriveAppDataRemote(api, 'library.json'),
+      ),
       server: ReaderServer(),
       settings: ReaderSettings(),
     );
     await Future.wait([
       services.progress.load(),
       services.annotations.load(),
+      services.meta.load(),
       services.settings.load(),
     ]);
     return services;

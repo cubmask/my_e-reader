@@ -11,6 +11,8 @@ The full architecture and roadmap are in the
 
 Phase 4 starts with office documents. DOC, DOCX, RTF and ODT files are converted by Google Drive on first open: the app makes a temporary Google Docs copy, exports it as EPUB, deletes the copy and caches the EPUB. Everything else (highlights, read aloud, spreads) then works as for any EPUB. This needs the extra `drive.file` permission, so Google asks for consent once more after updating. Very large documents (over Drive's 10 MB export limit) can't be converted.
 
+The library now shows real titles and authors. Opening a book fills them in from its own metadata, and a long press (or right click) on a card edits the title, author and collections. Collections appear as chips above the format filters; long-press one to rename or delete it. These details sync through a hidden `library.json` in Drive's app data folder.
+
 Phase 3 added notes and read-aloud:
 
 - Select text to highlight it in yellow, green, blue or pink, with an optional note. Tap a highlight to recolour, edit or delete it.
