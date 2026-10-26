@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -47,9 +48,12 @@ class CloudVoice {
 
 /// A request the provider refused or that couldn't reach it.
 class CloudVoiceException implements Exception {
-  const CloudVoiceException(this.message);
+  const CloudVoiceException(this.message, {this.status});
 
   final String message;
+
+  /// The HTTP status, when the service answered.
+  final int? status;
 
   @override
   String toString() => message;
@@ -88,7 +92,7 @@ class CloudTtsClient {
       402 => 'The account is out of credits',
       429 => 'Too many requests; try again shortly',
       final code => 'The voice service failed ($code${_reason(response)})',
-    });
+    }, status: response.statusCode);
   }
 
   static String _reason(http.Response response) {
@@ -170,7 +174,15 @@ class CloudTtsClient {
     }
   }
 
-  /// [text] spoken as MP3.
+  /// ElevenLabs models that refused the surrounding sentences, which are
+  /// then left out.
+  static final _noContext = <String>{};
+
+  /// Context sent with a sentence: enough to set the tone, no more.
+  static const _contextChars = 500;
+
+  /// [text] spoken as MP3. ElevenLabs also gets [context], so the
+  /// intonation flows from one sentence into the next.
   Future<Uint8List> speak(
     CloudProvider provider,
     String key, {
@@ -179,9 +191,12 @@ class CloudTtsClient {
     required String voice,
     required String language,
     required double speed,
+    SpeechContext? context,
   }) async {
-    final response = switch (provider) {
-      CloudProvider.elevenLabs => await _send(
+    Future<http.Response> eleven({required bool withContext}) {
+      final previous = withContext ? context?.previous : null;
+      final next = withContext ? context?.next : null;
+      return _send(
         _http.post(
           _eleven.replace(
             path: '/v1/text-to-speech/$voice',
@@ -198,9 +213,37 @@ class CloudTtsClient {
             if (model != 'eleven_multilingual_v2') 'language_code': language,
             // ElevenLabs accepts 0.7x to 1.2x.
             'voice_settings': {'speed': speed.clamp(0.7, 1.2)},
+            if (previous != null && previous.isNotEmpty)
+              'previous_text': previous.length > _contextChars
+                  ? previous.substring(previous.length - _contextChars)
+                  : previous,
+            if (next != null && next.isNotEmpty)
+              'next_text': next.length > _contextChars
+                  ? next.substring(0, _contextChars)
+                  : next,
           }),
         ),
-      ),
+      );
+    }
+
+    Future<http.Response> elevenWithContext() async {
+      final hasContext = context?.previous != null || context?.next != null;
+      if (!hasContext || _noContext.contains(model)) {
+        return eleven(withContext: false);
+      }
+      try {
+        return await eleven(withContext: true);
+      } on CloudVoiceException catch (e) {
+        if (e.status != 400 && e.status != 422) rethrow;
+        // A model without request stitching: try once more without.
+        final response = await eleven(withContext: false);
+        _noContext.add(model);
+        return response;
+      }
+    }
+
+    final response = switch (provider) {
+      CloudProvider.elevenLabs => await elevenWithContext(),
       CloudProvider.fishAudio => await _send(
         _http.post(
           _fish.replace(path: '/v1/tts'),
@@ -226,7 +269,8 @@ class CloudTtsClient {
   }
 }
 
-/// Renders sentences with an online voice into MP3 files.
+/// Renders sentences with an online voice into MP3 files, reusing audio
+/// already paid for when a passage is read again.
 class CloudSynthesizer implements Synthesizer {
   CloudSynthesizer(
     this._client,
@@ -235,6 +279,7 @@ class CloudSynthesizer implements Synthesizer {
     required this.model,
     required this.voice,
     required Directory outDir,
+    this.cache,
   }) : _out = outDir;
 
   final CloudTtsClient _client;
@@ -243,6 +288,7 @@ class CloudSynthesizer implements Synthesizer {
   final String model;
   final String voice;
   final Directory _out;
+  final AudioCache? cache;
   int _next = 0;
 
   @override
@@ -251,16 +297,8 @@ class CloudSynthesizer implements Synthesizer {
     required String language,
     required int speaker,
     required double speed,
+    SpeechContext? context,
   }) async {
-    final audio = await _client.speak(
-      provider,
-      _key,
-      text: text,
-      model: model,
-      voice: voice,
-      language: language,
-      speed: speed,
-    );
     await _out.create(recursive: true);
     final file = File(
       p.join(
@@ -269,8 +307,97 @@ class CloudSynthesizer implements Synthesizer {
         '${_next++}.mp3',
       ),
     );
+    final cacheKey = AudioCache.keyOf([
+      provider.name,
+      model,
+      voice,
+      language,
+      speed,
+      text,
+    ]);
+    // The engine deletes what it played, so it gets a copy.
+    if (await cache?.lookup(cacheKey) case final cached?) {
+      return (await cached.copy(file.path)).path;
+    }
+    final audio = await _client.speak(
+      provider,
+      _key,
+      text: text,
+      model: model,
+      voice: voice,
+      language: language,
+      speed: speed,
+      context: context,
+    );
     await file.writeAsBytes(audio);
+    await cache?.store(cacheKey, audio);
     return file.path;
+  }
+}
+
+/// Online audio kept on disk, oldest-used dropped first past [maxBytes].
+class AudioCache {
+  AudioCache(this.dir, {this.maxBytes = 300 * 1000 * 1000});
+
+  final Directory dir;
+  final int maxBytes;
+  int _writes = 0;
+
+  static String keyOf(List<Object> parts) =>
+      sha1.convert(utf8.encode(parts.join('\u0000'))).toString();
+
+  File _file(String key) => File(p.join(dir.path, '$key.mp3'));
+
+  Future<File?> lookup(String key) async {
+    final file = _file(key);
+    try {
+      if (!await file.exists()) return null;
+      await file.setLastModified(DateTime.now());
+      return file;
+    } on FileSystemException {
+      return null;
+    }
+  }
+
+  Future<void> store(String key, List<int> audio) async {
+    try {
+      await dir.create(recursive: true);
+      final file = _file(key);
+      final partial = File('${file.path}.part');
+      await partial.writeAsBytes(audio, flush: true);
+      await partial.rename(file.path);
+      if (++_writes % 20 == 1) await prune();
+    } on FileSystemException catch (e) {
+      debugPrint('Could not cache audio: $e');
+    }
+  }
+
+  Future<List<(File, FileStat)>> _entries() async {
+    if (!await dir.exists()) return const [];
+    return [
+      await for (final e in dir.list())
+        if (e is File && e.path.endsWith('.mp3')) (e, await e.stat()),
+    ];
+  }
+
+  Future<int> size() async =>
+      (await _entries()).fold<int>(0, (sum, e) => sum + e.$2.size);
+
+  /// Drops the least recently played audio down to 80% of [maxBytes].
+  Future<void> prune() async {
+    final entries = await _entries();
+    var total = entries.fold<int>(0, (sum, e) => sum + e.$2.size);
+    if (total <= maxBytes) return;
+    entries.sort((a, b) => a.$2.modified.compareTo(b.$2.modified));
+    for (final (file, stat) in entries) {
+      if (total <= maxBytes * 0.8) break;
+      await file.delete().catchError((_) => file);
+      total -= stat.size;
+    }
+  }
+
+  Future<void> clear() async {
+    if (await dir.exists()) await dir.delete(recursive: true);
   }
 }
 

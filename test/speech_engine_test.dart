@@ -9,6 +9,7 @@ class _FakeSynth implements Synthesizer {
 
   final Directory dir;
   final requests = <String>[];
+  final contexts = <SpeechContext?>[];
   int _n = 0;
 
   @override
@@ -17,8 +18,10 @@ class _FakeSynth implements Synthesizer {
     required String language,
     required int speaker,
     required double speed,
+    SpeechContext? context,
   }) async {
     requests.add('$language/$speaker/$speed: $text');
+    contexts.add(context);
     final file = File('${dir.path}/${_n++}.wav');
     await file.writeAsString(text);
     return file.path;
@@ -55,12 +58,16 @@ void main() {
     await engine.setLanguage('fr');
     await engine.setSpeed(1.25);
 
-    engine.prepare('Deux.');
-    await engine.speak('Un.');
-    await engine.speak('Deux.');
+    engine.prepare('Deux.', (previous: 'Un.', next: null));
+    await engine.speak('Un.', (previous: null, next: 'Deux.'));
+    await engine.speak('Deux.', (previous: 'Un.', next: null));
 
     expect(out.played, ['Un.', 'Deux.']);
     expect(synth.requests, ['fr/3/1.25: Deux.', 'fr/3/1.25: Un.']);
+    expect(synth.contexts, [
+      (previous: 'Un.', next: null),
+      (previous: null, next: 'Deux.'),
+    ]);
     await Future<void>.delayed(const Duration(milliseconds: 10));
     expect(dir.listSync(), isEmpty);
   });

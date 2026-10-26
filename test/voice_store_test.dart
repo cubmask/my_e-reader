@@ -21,6 +21,7 @@ class _NoSynth implements Synthesizer {
     required String language,
     required int speaker,
     required double speed,
+    SpeechContext? context,
   }) => throw UnimplementedError();
 }
 
@@ -39,9 +40,10 @@ class _System implements SpeechEngine {
   final spoken = <String>[];
 
   @override
-  Future<void> speak(String text) async => spoken.add(text);
+  Future<void> speak(String text, [SpeechContext? context]) async =>
+      spoken.add(text);
   @override
-  void prepare(String text) {}
+  void prepare(String text, [SpeechContext? context]) {}
   @override
   Future<bool> pause() async => false;
   @override

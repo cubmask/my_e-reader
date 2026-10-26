@@ -109,34 +109,47 @@ class ReadAloud extends ChangeNotifier {
     await engine.setLanguage(language);
     await engine.setSpeed(_speed);
     notifyListeners();
+    String? previous;
     while (block != null && run == _run) {
       final segments = [
         for (final s in block)
           if (s.text.trim().isNotEmpty) s,
       ];
+      String? textAt(int i) => i < segments.length ? segments[i].text : null;
       Future<List<SpeechSegment>?>? upcoming;
       for (var i = 0; i < segments.length; i++) {
         if (run != _run) return;
         final segment = segments[i];
         source.onSegment(segment);
         if (i + 1 < segments.length) {
-          engine.prepare(segments[i + 1].text);
+          engine.prepare(textAt(i + 1)!, (
+            previous: segment.text,
+            next: textAt(i + 2),
+          ));
         } else {
           // Fetch the next block while the last sentence plays.
           upcoming = source.next().then((next) {
-            final first = next?.where((s) => s.text.trim().isNotEmpty);
-            if (first != null && first.isNotEmpty && run == _run) {
-              engine.prepare(first.first.text);
+            final texts = [
+              for (final s in next ?? const <SpeechSegment>[])
+                if (s.text.trim().isNotEmpty) s.text,
+            ];
+            if (texts.isNotEmpty && run == _run) {
+              engine.prepare(texts.first, (
+                previous: segment.text,
+                next: texts.elementAtOrNull(1),
+              ));
             }
             return next;
           });
         }
+        final context = (previous: previous, next: textAt(i + 1));
         do {
           if (_resumed case final resumed?) await resumed.future;
           if (run != _run) return;
           _repeat = false;
-          await engine.speak(segment.text);
+          await engine.speak(segment.text, context);
         } while (_repeat && run == _run);
+        previous = segment.text;
       }
       if (run != _run) return;
       block = await (upcoming ?? source.next());

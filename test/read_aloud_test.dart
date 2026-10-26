@@ -10,6 +10,8 @@ class _FakeEngine implements SpeechEngine {
   final bool canPause;
   final spoken = <String>[];
   final prepared = <String>[];
+  final contexts = <SpeechContext?>[];
+  final preparedContexts = <SpeechContext?>[];
   double? speed;
   String? language;
 
@@ -18,8 +20,9 @@ class _FakeEngine implements SpeechEngine {
   Completer<void>? _current;
 
   @override
-  Future<void> speak(String text) async {
+  Future<void> speak(String text, [SpeechContext? context]) async {
     spoken.add(text);
+    contexts.add(context);
     if (gate case final gate?) {
       final current = _current = Completer<void>();
       await Future.any([gate.future, current.future]);
@@ -27,7 +30,10 @@ class _FakeEngine implements SpeechEngine {
   }
 
   @override
-  void prepare(String text) => prepared.add(text);
+  void prepare(String text, [SpeechContext? context]) {
+    prepared.add(text);
+    preparedContexts.add(context);
+  }
 
   @override
   Future<bool> pause() async => canPause;
@@ -122,6 +128,16 @@ void main() {
 
       expect(engine.spoken, ['One.', 'Two.', 'Three.']);
       expect(engine.prepared, ['Two.', 'Three.']);
+      // Each sentence comes with its neighbours, across blocks too.
+      expect(engine.contexts, [
+        (previous: null, next: 'Two.'),
+        (previous: 'One.', next: null),
+        (previous: 'Two.', next: null),
+      ]);
+      expect(engine.preparedContexts, [
+        (previous: 'One.', next: null),
+        (previous: 'Two.', next: null),
+      ]);
       expect(source.marks, ['a', 'b', 'c']);
       expect(engine.speed, 1.5);
       expect(engine.language, 'de');
