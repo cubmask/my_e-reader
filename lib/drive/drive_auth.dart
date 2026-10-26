@@ -6,10 +6,13 @@ import 'package:googleapis_auth/auth_io.dart' as auth;
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
-/// Read the books folder, and read/write sync data in the hidden app folder.
+/// Read the books folder, read/write sync data in the hidden app folder, and
+/// create (then delete) the temporary Google Docs copies used to convert
+/// office documents.
 const driveScopes = [
   drive.DriveApi.driveReadonlyScope,
   drive.DriveApi.driveAppdataScope,
+  drive.DriveApi.driveFileScope,
 ];
 
 /// Signs the user in to Google and returns an authorised HTTP client.

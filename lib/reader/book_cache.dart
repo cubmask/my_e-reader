@@ -11,6 +11,10 @@ import '../library/book.dart';
 /// Files are keyed by Drive id and modified time, so an edited book in Drive
 /// is fetched again. The least recently opened files are evicted once the
 /// cache passes [maxBytes].
+///
+/// Office documents (DOC, DOCX, RTF, ODT) are converted by Google Drive: a
+/// temporary Google Docs copy is exported as EPUB, then deleted. The cached
+/// file is that EPUB.
 class BookCache {
   BookCache(this._api, this._dir, {this.maxBytes = 2 * 1024 * 1024 * 1024});
 
@@ -20,7 +24,9 @@ class BookCache {
 
   File _fileFor(Book book) {
     final stamp = book.modifiedTime?.millisecondsSinceEpoch ?? 0;
-    final ext = book.format.extensions.first;
+    final ext = book.format.needsConversion
+        ? '.epub'
+        : book.format.extensions.first;
     return File(p.join(_dir.path, '${book.driveFileId}_$stamp$ext'));
   }
 
@@ -36,11 +42,53 @@ class BookCache {
       return file;
     }
     await _dir.create(recursive: true);
-    final media = await _api.files.get(
+    if (book.format.needsConversion) {
+      await _convert(book, file, onProgress);
+    } else {
+      final media = await _api.files.get(
+        book.driveFileId,
+        downloadOptions: drive.DownloadOptions.fullMedia,
+      ) as drive.Media;
+      await _write(media, file, media.length ?? book.sizeBytes, onProgress);
+    }
+    await _removeOlderVersions(book, keep: file);
+    await evict(keep: file);
+    return file;
+  }
+
+  Future<void> _convert(
+    Book book,
+    File file,
+    void Function(double)? onProgress,
+  ) async {
+    final copy = await _api.files.copy(
+      drive.File(
+        name: '${book.displayTitle} (My E-Reader conversion)',
+        mimeType: _googleDoc,
+      ),
       book.driveFileId,
-      downloadOptions: drive.DownloadOptions.fullMedia,
-    ) as drive.Media;
-    final total = media.length ?? book.sizeBytes;
+      $fields: 'id',
+    );
+    try {
+      final media = await _api.files.export(
+        copy.id!,
+        'application/epub+zip',
+        downloadOptions: drive.DownloadOptions.fullMedia,
+      ) as drive.Media;
+      await _write(media, file, media.length, onProgress);
+    } finally {
+      await _api.files.delete(copy.id!).catchError((_) {});
+    }
+  }
+
+  static const _googleDoc = 'application/vnd.google-apps.document';
+
+  Future<void> _write(
+    drive.Media media,
+    File file,
+    int? total,
+    void Function(double)? onProgress,
+  ) async {
     final partial = File('${file.path}.part');
     final sink = partial.openWrite();
     var received = 0;
@@ -57,9 +105,6 @@ class BookCache {
       rethrow;
     }
     await partial.rename(file.path);
-    await _removeOlderVersions(book, keep: file);
-    await evict(keep: file);
-    return file;
   }
 
   Future<void> _removeOlderVersions(Book book, {required File keep}) async {
