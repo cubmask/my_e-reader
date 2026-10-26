@@ -146,6 +146,7 @@ void main() {
       expect(find.text('Not started yet'), findsOneWidget);
       // Nothing arrived in Drive lately, so there is no hero.
       expect(find.textContaining('NEW IN YOUR DRIVE'), findsNothing);
+      expect(find.text('Duplicates found'), findsNothing);
     });
 
     testWidgets('Home highlights books new in Drive on a $name', (
@@ -205,6 +206,45 @@ void main() {
       expect(controller.books.map((b) => b.driveFileId), contains('c1'));
       expect(controller.books.map((b) => b.driveFileId), isNot(contains('c2')));
       expect(find.text('No duplicates in your library.'), findsOneWidget);
+    });
+
+    testWidgets('Home deletes extra copies in one go on a $name', (
+      tester,
+    ) async {
+      Book copy(String id, int day) => Book(
+        driveFileId: id,
+        fileName: 'Circe ($id).epub',
+        format: BookFormat.epub,
+        folderPath: '',
+        sizeBytes: 2 * 1024 * 1024,
+        md5: 'same',
+        createdTime: DateTime.utc(2026, 1, day),
+      );
+      final controller = await signedIn(
+        tester,
+        library: [...books, copy('z1', 1), copy('z2', 5), copy('z3', 9)],
+      );
+      await pumpApp(tester, controller, size);
+      expect(find.text('Duplicates found'), findsOneWidget);
+      expect(find.textContaining('2 identical extra copies'), findsOneWidget);
+
+      await tester.tap(find.text('Delete 2 extra copies'));
+      await tester.pumpAndSettle();
+      expect(find.text('Delete 2 files permanently?'), findsOneWidget);
+      await tester.tap(find.text('Delete 2'));
+      // Each delete touches the disk, which needs real time between frames.
+      for (var i = 0; i < 10 && controller.books.length > 8; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 50)),
+        );
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+      final left = controller.books.map((b) => b.driveFileId);
+      expect(left, contains('z1'));
+      expect(left, isNot(contains('z2')));
+      expect(left, isNot(contains('z3')));
+      expect(find.text('Duplicates found'), findsNothing);
     });
 
     testWidgets('Library lists every book on a $name', (tester) async {

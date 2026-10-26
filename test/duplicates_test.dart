@@ -2,6 +2,7 @@ import 'package:ebook_reader/core/book_format.dart';
 import 'package:ebook_reader/library/book.dart';
 import 'package:ebook_reader/library/duplicates.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 Book _book(
   String id,
@@ -74,5 +75,36 @@ void main() {
     expect(normalizeTitle('The Hobbit: There and Back Again'), 'hobbit');
     expect(normalizeTitle('hobbit (Retail) [2012]'), 'hobbit');
     expect(normalizeTitle('A'), 'a');
+  });
+
+  test('extras are every copy but the one kept', () {
+    final g = _find([
+      _book('e', 'Dune.epub', md5: '1', day: 1),
+      _book('p', 'Dune.pdf', md5: '2', day: 2, format: BookFormat.pdf),
+    ]).single;
+    expect(g.suggested, isEmpty);
+    expect(g.extras.map((b) => b.driveFileId), ['p']);
+  });
+
+  test('dismissed duplicates stay quiet until a new one turns up', () async {
+    SharedPreferences.setMockInitialValues({});
+    final first = _find([
+      _book('a', 'Circe.epub', md5: 'x'),
+      _book('b', 'Circe (1).epub', md5: 'x', day: 2),
+    ]);
+    final alerts = DuplicateAlerts();
+    expect(alerts.unseen(first), hasLength(1));
+    await alerts.dismiss(first);
+
+    final reloaded = DuplicateAlerts();
+    await reloaded.load();
+    expect(reloaded.unseen(first), isEmpty);
+    // A third copy makes it a different group, so it's raised again.
+    final more = _find([
+      _book('a', 'Circe.epub', md5: 'x'),
+      _book('b', 'Circe (1).epub', md5: 'x', day: 2),
+      _book('c', 'Circe (2).epub', md5: 'x', day: 3),
+    ]);
+    expect(reloaded.unseen(more), hasLength(1));
   });
 }

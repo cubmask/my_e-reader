@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../library/book.dart';
+import '../library/duplicates.dart';
 import '../library/library_controller.dart';
 import '../reader/reader_services.dart';
 import 'book_cover.dart';
 import 'book_sheet.dart';
 import 'breakpoints.dart';
+import 'delete_books.dart';
+import 'duplicates_screen.dart';
 import 'library_screen.dart';
 
 /// The first screen, like Apple Books' Home: the book you're reading, then
@@ -32,6 +35,7 @@ class HomeScreen extends StatelessWidget {
             services.cache,
             services.covers,
             services.newBooks,
+            services.duplicates,
           ]),
           builder: (context, _) =>
               _buildShelves(context, controller.books, services),
@@ -78,6 +82,18 @@ class HomeScreen extends StatelessWidget {
             child: Text('Home', style: largeTitle(context)),
           ),
           const SizedBox(height: 20),
+          if (services.duplicates.unseen(duplicatesIn(controller))
+              case final found when found.isNotEmpty) ...[
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: pad),
+              child: _DuplicatesBanner(
+                groups: found,
+                controller: controller,
+                services: services,
+              ),
+            ),
+            const SizedBox(height: 20),
+          ],
           if (fresh.isNotEmpty) ...[
             _NewBooksHero(
               books: fresh,
@@ -464,6 +480,130 @@ class _Shelf extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Raised on Home when the library has duplicates the user hasn't
+/// dismissed: deletes every extra identical copy in one go, or opens the
+/// Duplicates screen to review the rest.
+class _DuplicatesBanner extends StatefulWidget {
+  const _DuplicatesBanner({
+    required this.groups,
+    required this.controller,
+    required this.services,
+  });
+
+  final List<DuplicateGroup> groups;
+  final LibraryController controller;
+  final ReaderServices services;
+
+  @override
+  State<_DuplicatesBanner> createState() => _DuplicatesBannerState();
+}
+
+class _DuplicatesBannerState extends State<_DuplicatesBanner> {
+  bool _deleting = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final groups = widget.groups;
+    final extras = [for (final g in groups) ...g.suggested];
+    final formats = groups.where((g) => !g.identical).length;
+    final bytes = extras.fold<int>(0, (sum, b) => sum + (b.sizeBytes ?? 0));
+    String plural(int n, String one, String many) => n == 1 ? one : many;
+    final lines = [
+      if (extras.isNotEmpty)
+        '${extras.length} identical extra '
+            '${plural(extras.length, 'copy', 'copies')}'
+            '${bytes > 0 ? ' (${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB)' : ''}',
+      if (formats > 0)
+        '$formats ${plural(formats, 'book', 'books')} in more than one format',
+    ];
+    return Card(
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      color: theme.colorScheme.surfaceContainerLow,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.file_copy_outlined,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Duplicates found',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Dismiss',
+                  icon: const Icon(Icons.close),
+                  onPressed: () => widget.services.duplicates.dismiss(groups),
+                ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.only(left: 36, right: 8),
+              child: Text(lines.join(' and ')),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                if (extras.isNotEmpty)
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: theme.colorScheme.error,
+                      foregroundColor: theme.colorScheme.onError,
+                    ),
+                    icon: _deleting
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.delete_sweep_outlined),
+                    label: Text(
+                      'Delete ${extras.length} extra '
+                      '${plural(extras.length, 'copy', 'copies')}',
+                    ),
+                    onPressed: _deleting
+                        ? null
+                        : () async {
+                            await confirmAndDelete(
+                              context,
+                              extras,
+                              widget.services,
+                              onConfirmed: () =>
+                                  setState(() => _deleting = true),
+                            );
+                            if (mounted) setState(() => _deleting = false);
+                          },
+                  ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          DuplicatesScreen(controller: widget.controller),
+                    ),
+                  ),
+                  child: const Text('Review'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
