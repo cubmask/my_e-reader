@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../read_aloud.dart';
+import 'cloud_voices.dart';
 import 'sherpa_synthesizer.dart';
 import 'speech_engine.dart';
 import 'voice_pack.dart';
@@ -17,9 +18,10 @@ enum VoiceStatus { notInstalled, downloading, installing, installed }
 
 typedef SynthesizerFactory = Future<Synthesizer> Function(Directory modelDir);
 
-/// Downloads, removes and picks the offline neural voice, falling back to
-/// the system voices for languages it doesn't speak or when it isn't
-/// installed. The model lives outside the app, so the app stays small.
+/// Picks the voice to read with: an online voice when one is set up and
+/// reachable, else the downloaded offline voice when it speaks the
+/// language, else the system's. Also downloads and removes the offline
+/// model, which lives outside the app so the app stays small.
 class VoiceStore extends ChangeNotifier implements Voices {
   VoiceStore(
     this.root, {
@@ -29,7 +31,9 @@ class VoiceStore extends ChangeNotifier implements Voices {
     AudioOut Function()? audioOut,
     SpeechEngine? system,
     String Function()? deviceLanguage,
-  }) : _client = client ?? http.Client(),
+    CloudVoiceSettings? cloud,
+  }) : cloud = cloud ?? CloudVoiceSettings(),
+       _client = client ?? http.Client(),
        _startSynthesizer = synthesizer,
        _audioOut = audioOut ?? PlayerAudioOut.new,
        _systemOverride = system,
@@ -43,6 +47,9 @@ class VoiceStore extends ChangeNotifier implements Voices {
   static const _marker = '.installed';
 
   final Directory root;
+
+  /// The online voice settings.
+  final CloudVoiceSettings cloud;
   final VoicePack pack;
   final http.Client _client;
   final SynthesizerFactory? _startSynthesizer;
@@ -61,6 +68,10 @@ class VoiceStore extends ChangeNotifier implements Voices {
   NeuralSpeechEngine? _neural;
   Future<NeuralSpeechEngine>? _loading;
   Synthesizer? _synth;
+  late final AudioOut _player = _audioOut();
+  NeuralSpeechEngine? _cloudEngine;
+  String? _cloudEngineKey;
+  String? _cloudError;
 
   Directory get modelDir => Directory(p.join(root.path, pack.id));
   VoiceStatus get status => _status;
@@ -79,7 +90,15 @@ class VoiceStore extends ChangeNotifier implements Voices {
   /// A language to always read in, or null to follow each book.
   String? get language => _language;
 
+  /// For listing an online provider's voices.
+  CloudTtsClient get cloudClient => CloudTtsClient(_client);
+
+  /// Why reading last switched from the online voice to an offline one.
+  String? get cloudError => _cloudError;
+
   Future<void> load() async {
+    cloud.addListener(notifyListeners);
+    await cloud.load();
     final prefs = await SharedPreferences.getInstance();
     _useNeural = prefs.getBool(_useKey) ?? true;
     _speaker = (prefs.getInt(_speakerKey) ?? 0).clamp(
@@ -132,11 +151,64 @@ class VoiceStore extends ChangeNotifier implements Voices {
   bool usesNeuralFor(String language) =>
       installed && _useNeural && pack.speaks(language);
 
+  /// The voice reading [language], such as "ElevenLabs · Rachel".
+  String describe(String language) {
+    final offline = usesNeuralFor(language) ? pack.name : 'System voice';
+    final provider = cloud.provider;
+    if (!cloud.ready || provider == null) return offline;
+    if (_cloudError case final error?) {
+      return '$offline (${provider.label}: $error)';
+    }
+    final voice = cloud.voiceFor(provider)?.name;
+    return [provider.label, ?voice].join(' · ');
+  }
+
   @override
   Future<SpeechEngine> engineFor(String language) async {
+    final online = _cloud();
+    if (online == null) return _offline(language);
+    _cloudError = null;
+    return FallbackSpeechEngine(
+      online,
+      () => _offline(language),
+      onFallback: (e) {
+        _cloudError = e is CloudVoiceException ? e.message : '$e';
+        debugPrint('Online voice failed, reading offline: $e');
+        notifyListeners();
+      },
+    );
+  }
+
+  /// The online voice, while one is set up.
+  NeuralSpeechEngine? _cloud() {
+    final provider = cloud.provider;
+    if (!cloud.ready || provider == null) return null;
+    final apiKey = cloud.keyFor(provider)!;
+    final model = cloud.modelFor(provider);
+    final voice = cloud.voiceFor(provider)?.id ?? '';
+    final key = '${provider.name}|$model|$voice|$apiKey';
+    if (key != _cloudEngineKey) {
+      _cloudEngineKey = key;
+      _cloudEngine = NeuralSpeechEngine(
+        CloudSynthesizer(
+          CloudTtsClient(_client),
+          provider,
+          apiKey,
+          model: model,
+          voice: voice,
+          outDir: Directory(p.join(Directory.systemTemp.path, 'tts-online')),
+        ),
+        _player,
+      );
+    }
+    return _cloudEngine;
+  }
+
+  Future<SpeechEngine> _offline(String language) async {
     if (!usesNeuralFor(language)) return _system;
     try {
-      return await (_loading ??= _loadNeural());
+      final neural = await (_loading ??= _loadNeural());
+      return FallbackSpeechEngine(neural, () async => _system);
     } catch (e) {
       _loading = null;
       debugPrint('Neural voice failed to load, using the system voice: $e');
@@ -146,7 +218,7 @@ class VoiceStore extends ChangeNotifier implements Voices {
 
   Future<NeuralSpeechEngine> _loadNeural() async {
     final synth = _synth = await (_startSynthesizer ?? _sherpa)(modelDir);
-    return _neural = NeuralSpeechEngine(synth, _audioOut(), speaker: _speaker);
+    return _neural = NeuralSpeechEngine(synth, _player, speaker: _speaker);
   }
 
   static Future<Synthesizer> _sherpa(Directory modelDir) async =>
@@ -247,6 +319,7 @@ class VoiceStore extends ChangeNotifier implements Voices {
 
   @override
   void dispose() {
+    cloud.removeListener(notifyListeners);
     _unloadNeural();
     super.dispose();
   }

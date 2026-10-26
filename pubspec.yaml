@@ -49,6 +49,7 @@ dependencies:
   audio_service: ^0.18.19
   audioplayers: ^6.8.1
   archive: ^4.5.2
+  flutter_secure_storage: ^11.2.0
 
 dev_dependencies:
   flutter_test:

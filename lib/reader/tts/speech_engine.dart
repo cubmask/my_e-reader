@@ -229,3 +229,64 @@ class PlayerAudioOut implements AudioOut {
     await _player.dispose();
   }
 }
+
+/// Speaks with a primary engine until it fails, such as an online voice
+/// losing its connection, then carries on with the fallback from the same
+/// sentence.
+class FallbackSpeechEngine implements SpeechEngine {
+  FallbackSpeechEngine(this._current, this._fallback, {this.onFallback});
+
+  SpeechEngine _current;
+  final Future<SpeechEngine> Function() _fallback;
+  final void Function(Object error)? onFallback;
+  bool _fellBack = false;
+  int _run = 0;
+  String? _language;
+  double? _speed;
+
+  @override
+  Future<void> speak(String text) async {
+    final run = _run;
+    try {
+      await _current.speak(text);
+    } catch (e) {
+      if (_fellBack) rethrow;
+      _fellBack = true;
+      onFallback?.call(e);
+      final failed = _current;
+      final next = await _fallback();
+      if (_language case final language?) await next.setLanguage(language);
+      if (_speed case final speed?) await next.setSpeed(speed);
+      _current = next;
+      unawaited(failed.stop());
+      if (run == _run) await next.speak(text);
+    }
+  }
+
+  @override
+  void prepare(String text) => _current.prepare(text);
+
+  @override
+  Future<bool> pause() => _current.pause();
+
+  @override
+  Future<void> resume() => _current.resume();
+
+  @override
+  Future<void> stop() {
+    _run++;
+    return _current.stop();
+  }
+
+  @override
+  Future<void> setSpeed(double speed) {
+    _speed = speed;
+    return _current.setSpeed(speed);
+  }
+
+  @override
+  Future<void> setLanguage(String language) {
+    _language = language;
+    return _current.setLanguage(language);
+  }
+}

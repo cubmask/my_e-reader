@@ -6,7 +6,9 @@ import 'package:ebook_reader/reader/tts/speech_engine.dart';
 import 'package:ebook_reader/reader/tts/voice_pack.dart';
 import 'package:ebook_reader/reader/tts/voice_store.dart';
 import 'package:ebook_reader/ui/voice_settings.dart';
+import 'package:ebook_reader/reader/tts/cloud_voices.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -34,8 +36,22 @@ class _NoOut implements AudioOut {
 }
 
 class _System implements SpeechEngine {
+  final spoken = <String>[];
+
   @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+  Future<void> speak(String text) async => spoken.add(text);
+  @override
+  void prepare(String text) {}
+  @override
+  Future<bool> pause() async => false;
+  @override
+  Future<void> resume() async {}
+  @override
+  Future<void> stop() async {}
+  @override
+  Future<void> setSpeed(double speed) async {}
+  @override
+  Future<void> setLanguage(String language) async {}
 }
 
 const _pack = VoicePack(
@@ -62,6 +78,7 @@ void main() {
 
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
+    FlutterSecureStorage.setMockInitialValues({});
     dir = await Directory.systemTemp.createTemp('voices');
     system = _System();
     synthStarts = 0;
@@ -110,9 +127,9 @@ void main() {
     ]);
     expect(dir.listSync().map((e) => e.path.split('/').last), ['test-voice']);
 
-    final engine = await voices.engineFor('en');
-    expect(engine, isA<NeuralSpeechEngine>());
-    expect(await voices.engineFor('de'), same(engine));
+    // The neural voice, falling back to the system's if it fails.
+    expect(await voices.engineFor('en'), isA<FallbackSpeechEngine>());
+    expect(await voices.engineFor('de'), isA<FallbackSpeechEngine>());
     expect(synthStarts, 1);
     // Languages the voice doesn't speak, or turning it off, use the system.
     expect(await voices.engineFor('zh'), same(system));
@@ -183,5 +200,62 @@ void main() {
     expect(find.text('Read with Test voice'), findsOneWidget);
     expect(find.text('A'), findsOneWidget);
     expect(find.text('Automatic'), findsOneWidget);
+
+    // Online voices: pick a provider, then it asks for a key.
+    expect(find.text('API key'), findsNothing);
+    await tester.tap(find.text('ElevenLabs'));
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pump();
+    expect(find.text('API key'), findsOneWidget);
+    expect(find.text('Needed to use ElevenLabs'), findsOneWidget);
+    expect(find.text('Eleven v4 (best for audiobooks)'), findsOneWidget);
+  });
+
+  test('reads online when set up, offline once that fails', () async {
+    final bytes = _modelArchive();
+    var online = true;
+    final voices = store(
+      MockClient.streaming((request, _) async {
+        if (request.url.host == 'example.com') {
+          return http.StreamedResponse(Stream.fromIterable([bytes]), 200);
+        }
+        if (!online) throw const SocketException('offline');
+        return http.StreamedResponse(
+          Stream.fromIterable([
+            [1, 2],
+          ]),
+          200,
+        );
+      }),
+    );
+    await voices.load();
+    expect(voices.describe('en'), 'System voice');
+
+    await voices.cloud.setProvider(CloudProvider.elevenLabs);
+    await voices.cloud.setKey(CloudProvider.elevenLabs, 'k');
+    expect(voices.describe('en'), 'System voice', reason: 'no voice yet');
+    await voices.cloud.setVoice(
+      CloudProvider.elevenLabs,
+      const CloudVoice('a1', 'Rachel'),
+    );
+    expect(voices.describe('en'), 'ElevenLabs · Rachel');
+    final engine = await voices.engineFor('en');
+    expect(engine, isA<FallbackSpeechEngine>());
+    await engine.speak('Hello.');
+    expect(voices.cloudError, isNull);
+
+    online = false;
+    await engine.speak('Still there?');
+    expect(voices.cloudError, 'No connection');
+    expect(system.spoken, ['Still there?']);
+    expect(voices.describe('en'), 'System voice (ElevenLabs: No connection)');
+
+    // The next reading tries the online voice again.
+    online = true;
+    await voices.engineFor('en');
+    expect(voices.cloudError, isNull);
+
+    await voices.cloud.setProvider(null);
+    expect(await voices.engineFor('en'), same(system));
   });
 }
