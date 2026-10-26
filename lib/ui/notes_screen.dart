@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../library/library_controller.dart';
 import '../notes/annotation_store.dart';
 import '../reader/reader_screen.dart';
+import 'library_screen.dart' show largeTitle;
 
 /// Every highlight, note and bookmark across the library.
 class NotesScreen extends StatefulWidget {
@@ -46,10 +47,7 @@ class _NotesScreenState extends State<NotesScreen> {
               sliver: SliverToBoxAdapter(
                 child: Row(
                   children: [
-                    Text(
-                      'Notes',
-                      style: Theme.of(context).textTheme.headlineMedium,
-                    ),
+                    Text('Notes', style: largeTitle(context)),
                     const SizedBox(width: 16),
                     Text('${items.length}'),
                     const Spacer(),

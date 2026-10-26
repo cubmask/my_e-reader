@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../library/book_meta_store.dart';
+import '../library/cover_store.dart';
 import '../notes/annotation_store.dart';
 import '../notes/ink_store.dart';
 import 'book_cache.dart';
@@ -21,6 +22,7 @@ class ReaderServices {
     required this.annotations,
     required this.meta,
     required this.ink,
+    required this.covers,
     required this.server,
     required this.settings,
   });
@@ -30,6 +32,7 @@ class ReaderServices {
   final AnnotationStore annotations;
   final BookMetaStore meta;
   final InkStore ink;
+  final CoverStore covers;
   final ReaderServer server;
   final ReaderSettings settings;
 
@@ -62,6 +65,7 @@ class ReaderServices {
         File(p.join(dir.path, 'ink.json')),
         DriveAppDataRemote(api, 'ink.json'),
       ),
+      covers: CoverStore(Directory(p.join(dir.path, 'covers')), client),
       server: ReaderServer(drive: client),
       settings: ReaderSettings(),
     );
@@ -71,6 +75,7 @@ class ReaderServices {
       services.meta.load(),
       services.ink.load(),
       services.cache.load(),
+      services.covers.load(),
       services.settings.load(),
     ]);
     return services;
