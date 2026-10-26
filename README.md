@@ -9,7 +9,9 @@ The full architecture and roadmap are in the
 
 ## Status
 
-Phase 1 (MVP reader) adds:
+Phase 2 adds DjVu (rendered with DjVu.js), CBR and RAR (UnRAR compiled to WebAssembly, run in a worker), and ZIP. An archive that holds one book opens as that book; one full of page images opens as a comic.
+
+Phase 1 (MVP reader) added:
 
 - Books download from Drive on first open and stay cached for offline reading (2 GB, least recently opened evicted first).
 - EPUB, MOBI, AZW3, FB2, TXT and CBZ open in a foliate-js reader inside a WebView, with tap zones, keyboard paging, contents, light/sepia/dark themes and text size.
@@ -19,9 +21,9 @@ Phase 1 (MVP reader) adds:
 
 Phase 0 laid the groundwork: the adaptive shell, Google sign-in, the Drive library with search and format filters, and format detection for every planned type.
 
-DjVu, CBR, RAR, ZIP and the office formats show a "later phase" notice for now.
+The office formats (DOC, DOCX, RTF, ODT) show a "phase 4" notice for now.
 
-The reader page (`assets/reader/`) bundles [foliate-js](https://github.com/johnfactotum/foliate-js) (MIT, see `assets/reader/foliate/VERSION`) and is served from a loopback-only server with a random path token. A Content Security Policy blocks scripts inside books.
+The reader page (`assets/reader/`) bundles [foliate-js](https://github.com/johnfactotum/foliate-js) (MIT, see `assets/reader/foliate/VERSION`) plus the DjVu and RAR libraries listed in `assets/reader/vendor/README.md` and is served from a loopback-only server with a random path token. A Content Security Policy blocks scripts inside books.
 
 ## Google Cloud setup (one time)
 

@@ -65,6 +65,7 @@ flutter:
     - assets/reader/
     - assets/reader/foliate/
     - assets/reader/foliate/vendor/
+    - assets/reader/vendor/
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
