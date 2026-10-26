@@ -31,6 +31,7 @@ class HomeScreen extends StatelessWidget {
             services.meta,
             services.cache,
             services.covers,
+            services.newBooks,
           ]),
           builder: (context, _) =>
               _buildShelves(context, controller.books, services),
@@ -59,6 +60,7 @@ class HomeScreen extends StatelessWidget {
     final current = started.firstOrNull;
     final recent = started.skip(1).take(15).toList();
     final downloaded = books.where(services.cache.isDownloaded).toList();
+    final fresh = services.newBooks.of(books, opened: (b) => opened(b) != null);
     final added = books.where((b) => opened(b) == null).toList()
       ..sort(
         (a, b) => (b.modifiedTime ?? DateTime(0)).compareTo(
@@ -76,6 +78,15 @@ class HomeScreen extends StatelessWidget {
             child: Text('Home', style: largeTitle(context)),
           ),
           const SizedBox(height: 20),
+          if (fresh.isNotEmpty) ...[
+            _NewBooksHero(
+              books: fresh,
+              services: services,
+              pad: pad,
+              wide: wide,
+            ),
+            const SizedBox(height: 28),
+          ],
           if (current != null)
             Padding(
               padding: EdgeInsets.symmetric(horizontal: pad),
@@ -108,13 +119,198 @@ class HomeScreen extends StatelessWidget {
             ),
           if (added.isNotEmpty)
             _Shelf(
-              title: 'New in your library',
+              title: 'Not started yet',
               books: added.take(20).toList(),
               services: services,
               pad: pad,
               wide: wide,
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// The hero at the top of Home for books that recently arrived in Drive.
+/// One new book fills the width; several scroll sideways.
+class _NewBooksHero extends StatelessWidget {
+  const _NewBooksHero({
+    required this.books,
+    required this.services,
+    required this.pad,
+    required this.wide,
+  });
+
+  final List<Book> books;
+  final ReaderServices services;
+  final double pad;
+  final bool wide;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final single = books.length == 1;
+    final height = wide ? 300.0 : 236.0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: EdgeInsets.fromLTRB(pad, 0, pad - 8, 8),
+          child: Row(
+            children: [
+              Icon(
+                Icons.auto_awesome,
+                size: 18,
+                color: theme.colorScheme.primary,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  single
+                      ? 'NEW IN YOUR DRIVE'
+                      : 'NEW IN YOUR DRIVE · ${books.length}',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.1,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () => services.newBooks.dismiss(books),
+                child: Text(single ? 'Dismiss' : 'Dismiss all'),
+              ),
+            ],
+          ),
+        ),
+        LayoutBuilder(
+          builder: (context, box) {
+            final full = box.maxWidth - 2 * pad;
+            // Several books: show a sliver of the next card as a hint.
+            final width = single
+                ? full
+                : (wide ? 620.0 : full - 32).clamp(0.0, full);
+            return SizedBox(
+              height: height,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: EdgeInsets.symmetric(horizontal: pad),
+                itemCount: books.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 16),
+                itemBuilder: (context, i) => SizedBox(
+                  width: width,
+                  child: _NewBookCard(
+                    book: books[i],
+                    services: services,
+                    wide: wide,
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _NewBookCard extends StatelessWidget {
+  const _NewBookCard({
+    required this.book,
+    required this.services,
+    required this.wide,
+  });
+
+  final Book book;
+  final ReaderServices services;
+  final bool wide;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final meta = services.meta[book.driveFileId];
+    final author = services.meta.authorOf(book);
+    final description = meta?.description ?? '';
+    final details = [
+      book.format.label,
+      if (meta?.published.isNotEmpty ?? false) meta!.published.split('-').first,
+      if (meta?.pageCount != null) '${meta!.pageCount} pages',
+    ].join(' · ');
+    return Material(
+      clipBehavior: Clip.antiAlias,
+      borderRadius: BorderRadius.circular(20),
+      // A warm wash of the accent colour sets the hero apart.
+      color: Color.alphaBlend(
+        theme.colorScheme.primary.withValues(alpha: 0.10),
+        theme.colorScheme.surfaceContainerLow,
+      ),
+      child: InkWell(
+        onTap: () => showBookSheet(context, book, services),
+        child: Padding(
+          padding: EdgeInsets.all(wide ? 24 : 16),
+          child: Row(
+            children: [
+              BookCover(book: book, services: services),
+              SizedBox(width: wide ? 24 : 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      services.meta.titleOf(book),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style:
+                          (wide
+                                  ? theme.textTheme.headlineSmall
+                                  : theme.textTheme.titleLarge)
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    if (author.isNotEmpty)
+                      Text(
+                        author,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    const SizedBox(height: 6),
+                    Text(details, style: theme.textTheme.bodySmall),
+                    if (description.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Flexible(
+                        child: Text(
+                          description,
+                          maxLines: wide ? 4 : 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        FilledButton.icon(
+                          icon: const Icon(Icons.menu_book),
+                          label: const Text('Read'),
+                          onPressed: () => openBook(context, book, services),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          tooltip: 'Not interested',
+                          icon: const Icon(Icons.close),
+                          onPressed: () => services.newBooks.dismiss([book]),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

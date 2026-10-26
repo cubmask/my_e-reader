@@ -10,6 +10,7 @@ class Book {
     this.sizeBytes,
     this.modifiedTime,
     this.thumbnailLink,
+    this.createdTime,
   });
 
   final String driveFileId;
@@ -24,6 +25,9 @@ class Book {
   /// A short-lived link to Drive's preview image, when Drive made one (it does
   /// for PDFs and images, rarely for ebooks).
   final String? thumbnailLink;
+
+  /// When the file arrived in Drive (uploaded or copied there).
+  final DateTime? createdTime;
 
   /// File name without its extension, used until real metadata is read.
   String get displayTitle {

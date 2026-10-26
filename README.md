@@ -11,15 +11,18 @@ The full architecture and roadmap are in the
 
 The interface follows Apple Books:
 
-- **Home** opens on a large *Continue reading* card for the book you read last. Below it are shelves of recent books, books on this device and books new in your library.
+- **Home** opens on a large *Continue reading* card for the book you read last. Below it are shelves of recent books, books on this device and books not started yet.
+- **New in your Drive:** books added to the Drive folder in the last 14 days appear in a hero above *Continue reading*, with cover, author and description. A book leaves the hero once it is opened or dismissed, and the hero is hidden when there is nothing new.
 - **Library** is a grid of covers with progress (or a NEW badge), a search bar, one row of filter chips (downloaded, collections, formats) and a sort menu (recently read, title, author, recently added).
 - **Covers:**
-  - Covers come from the book itself the first time it opens (EPUB, MOBI, FB2, comics, DjVu) or from Drive's preview image (PDFs).
+  - In order of preference, a cover is one you picked online, the book's own (read the first time it opens), one found by the automatic lookup, or Drive's preview image (PDFs).
   - Other books get a typeset cover in a muted colour.
 - **Book sheet:** tapping a cover opens the book. Long-pressing it, or tapping its *More* button, opens a sheet with the cover, details, progress, *Read/Continue*, *Download* and editing.
 - **Reader and theme:**
   - The reader's bars are frosted and tinted to the page, in light or dark to match the reading theme.
   - The theme uses plain white or black backgrounds with an orange accent.
+
+Book details and covers are looked up online, the way Calibre's *Download metadata* does. Each new book is searched once in [Google Books](https://developers.google.com/books) and [Open Library](https://openlibrary.org/developers/api) by its title and author (or by the file name, read as "Title - Author"). Only a confident match is used, and it fills in what is missing (description, publisher, date, ISBN, subjects, pages, rating, cover) without replacing what you typed. The book sheet shows these details and has *Find details and cover online* to search by hand and pick a match, which replaces everything. The automatic lookup can be turned off in Settings. Amazon and Goodreads aren't used because neither has a public API any more (Goodreads closed its API in 2020, and Amazon's needs an affiliate account). Google Books allows a modest number of keyless requests; for a big library, pass an API key with `--dart-define=GOOGLE_BOOKS_API_KEY=...`. Your Google sign-in is never sent to these services.
 
 Books now stream from Google Drive instead of being stored automatically. PDFs page in straight from Drive through HTTP range requests, relayed by the loopback server, so a large PDF opens without downloading all of it. Other formats need the whole file, so they go to a temporary streaming cache that is trimmed past 300 MB. To keep a book for offline reading, tap the download button in the reader or use *Download* in the book's details (long-press its card). Downloaded books show a tick on their card and are never evicted. A *Downloaded* filter lists them, and Settings shows the space used, with options to remove all downloads or clear the streaming cache. A downloaded book that changes in Drive is fetched again when the library refreshes.
 
