@@ -4,6 +4,7 @@ import '../core/book_format.dart';
 import '../library/book.dart';
 import '../library/book_meta_store.dart';
 import '../library/library_controller.dart';
+import '../reader/book_cache.dart';
 import '../reader/reader_screen.dart';
 import '../reader/reader_services.dart';
 
@@ -20,6 +21,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   String _query = '';
   BookFormat? _format;
   String? _collection;
+  bool _downloadedOnly = false;
 
   @override
   Widget build(BuildContext context) {
@@ -49,7 +51,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ),
           ),
           LibraryStatus.ready => ListenableBuilder(
-            listenable: c.services?.meta ?? c,
+            listenable: Listenable.merge([c.services?.meta, c.services?.cache]),
             builder: (context, _) => _buildLibrary(context, c.books),
           ),
         };
@@ -68,8 +70,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
         q.isEmpty ||
         (meta?.titleOf(b) ?? b.displayTitle).toLowerCase().contains(q) ||
         (meta?.authorOf(b) ?? '').toLowerCase().contains(q);
+    final cache = widget.controller.services?.cache;
     final shown = books
         .where((b) => _format == null || b.format == _format)
+        .where((b) => !_downloadedOnly || (cache?.isDownloaded(b) ?? false))
         .where(
           (b) =>
               _collection == null ||
@@ -151,6 +155,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
               child: Wrap(
                 spacing: 8,
                 children: [
+                  FilterChip(
+                    avatar: const Icon(Icons.download_done),
+                    label: const Text('Downloaded'),
+                    selected: _downloadedOnly,
+                    onSelected: (on) => setState(() => _downloadedOnly = on),
+                  ),
                   ChoiceChip(
                     label: const Text('All'),
                     selected: _format == null,
@@ -183,8 +193,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     ? null
                     : () => showDialog<void>(
                         context: context,
-                        builder: (_) =>
-                            BookDetailsDialog(book: shown[i], meta: meta),
+                        builder: (_) => BookDetailsDialog(
+                          book: shown[i],
+                          meta: meta,
+                          cache: cache,
+                        ),
                       ),
               ),
             ),
@@ -266,9 +279,32 @@ class _BookCard extends StatelessWidget {
               ),
               alignment: Alignment.bottomLeft,
               padding: const EdgeInsets.all(8),
-              child: Chip(
-                label: Text(book.format.label),
-                visualDensity: VisualDensity.compact,
+              child: Row(
+                children: [
+                  Chip(
+                    label: Text(book.format.label),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  const Spacer(),
+                  if (services?.cache case final cache?)
+                    if (cache.isDownloading(book))
+                      SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          value: cache.downloadProgress(book),
+                        ),
+                      )
+                    else if (cache.isDownloaded(book))
+                      Tooltip(
+                        message: 'Available offline',
+                        child: Icon(
+                          Icons.download_done,
+                          size: 20,
+                          color: scheme.primary,
+                        ),
+                      ),
+                ],
               ),
             ),
           ),
@@ -302,10 +338,16 @@ class _BookCard extends StatelessWidget {
 /// Edits a book's title, author and collections. Opened by a long press (or
 /// right click) on its card.
 class BookDetailsDialog extends StatefulWidget {
-  const BookDetailsDialog({super.key, required this.book, required this.meta});
+  const BookDetailsDialog({
+    super.key,
+    required this.book,
+    required this.meta,
+    this.cache,
+  });
 
   final Book book;
   final BookMetaStore meta;
+  final BookCache? cache;
 
   @override
   State<BookDetailsDialog> createState() => _BookDetailsDialogState();
@@ -416,6 +458,26 @@ class _BookDetailsDialogState extends State<BookDetailsDialog> {
         ),
       ),
       actions: [
+        if (widget.cache case final cache?)
+          if (cache.isDownloaded(widget.book))
+            TextButton.icon(
+              icon: const Icon(Icons.delete_outline),
+              label: const Text('Remove download'),
+              onPressed: () {
+                cache.removeDownload(widget.book);
+                Navigator.pop(context);
+              },
+            )
+          else
+            TextButton.icon(
+              icon: const Icon(Icons.download_for_offline_outlined),
+              label: const Text('Download'),
+              onPressed: () {
+                // Progress shows on the book's card.
+                cache.download(widget.book).catchError((_) {});
+                Navigator.pop(context);
+              },
+            ),
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:http/http.dart' as http;
@@ -100,6 +102,8 @@ class LibraryController extends ChangeNotifier {
       await _services?.meta.sync();
       _books = await _sourceFactory(client, folderId).listBooks();
       _set(LibraryStatus.ready);
+      // Fetch new versions of downloaded books in the background.
+      unawaited(_services?.cache.refreshDownloads(_books));
     } catch (e) {
       _fail(e);
     }

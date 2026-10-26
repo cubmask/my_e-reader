@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 class _Bundle extends CachingAssetBundle {
   @override
@@ -38,5 +39,35 @@ void main() {
     expect(guess.statusCode, 404);
     final missing = await http.get(page.resolve('nope.js'));
     expect(missing.statusCode, 404);
+  });
+
+  test('relays byte ranges of Drive files', () async {
+    final seen = <http.BaseRequest>[];
+    final drive = MockClient((request) async {
+      seen.add(request);
+      return http.Response.bytes(
+        [5, 6],
+        206,
+        headers: {
+          'content-type': 'application/pdf',
+          'content-range': 'bytes 4-5/100',
+        },
+      );
+    });
+    final server = ReaderServer(bundle: _Bundle(), drive: drive);
+    addTearDown(server.close);
+
+    final url = await server.driveUrl('abc_-1');
+    final reply = await http.get(url, headers: {'range': 'bytes=4-5'});
+    expect(reply.statusCode, 206);
+    expect(reply.bodyBytes, [5, 6]);
+    expect(reply.headers['content-range'], 'bytes 4-5/100');
+    expect(seen.single.url.path, '/drive/v3/files/abc_-1');
+    expect(seen.single.url.queryParameters['alt'], 'media');
+    expect(seen.single.headers['range'], 'bytes=4-5');
+
+    final bad = await http.get(url.resolve('a%2Fb'));
+    expect(bad.statusCode, 404);
+    expect(seen, hasLength(1));
   });
 }

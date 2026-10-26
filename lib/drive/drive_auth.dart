@@ -45,11 +45,15 @@ class MobileDriveAuth implements DriveAuth {
     final account =
         await signIn.attemptLightweightAuthentication() ??
         await signIn.authenticate(scopeHint: driveScopes);
-    final headers = await account.authorizationClient.authorizationHeaders(
+    final client = account.authorizationClient;
+    final headers = await client.authorizationHeaders(
       driveScopes,
       promptIfNecessary: true,
     );
-    return _HeaderClient(headers!);
+    return _HeaderClient(
+      headers!,
+      () => client.authorizationHeaders(driveScopes),
+    );
   }
 
   @override
@@ -86,14 +90,26 @@ class DesktopDriveAuth implements DriveAuth {
   }
 }
 
+/// Adds Google's authorization headers to each request.
+///
+/// Access tokens last an hour, so the headers are fetched again (silently)
+/// after [_maxAge]; a long reading session keeps working.
 class _HeaderClient extends http.BaseClient {
-  _HeaderClient(this._headers);
+  _HeaderClient(this._headers, this._refresh);
 
-  final Map<String, String> _headers;
+  Map<String, String> _headers;
+  final Future<Map<String, String>?> Function() _refresh;
+  DateTime _fetchedAt = DateTime.now();
   final _inner = http.Client();
 
+  static const _maxAge = Duration(minutes: 45);
+
   @override
-  Future<http.StreamedResponse> send(http.BaseRequest request) {
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    if (DateTime.now().difference(_fetchedAt) > _maxAge) {
+      _headers = await _refresh() ?? _headers;
+      _fetchedAt = DateTime.now();
+    }
     request.headers.addAll(_headers);
     return _inner.send(request);
   }
