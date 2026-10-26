@@ -6,6 +6,7 @@ import '../library/metadata_sources.dart';
 import '../reader/reader_screen.dart';
 import '../reader/reader_services.dart';
 import 'book_cover.dart';
+import 'delete_books.dart';
 import 'library_screen.dart' show BookDetailsDialog;
 
 void openBook(BuildContext context, Book book, ReaderServices services) {
@@ -209,6 +210,21 @@ class _BookSheet extends StatelessWidget {
                   builder: (_) =>
                       BookDetailsDialog(book: book, meta: services.meta),
                 ),
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                iconColor: theme.colorScheme.error,
+                textColor: theme.colorScheme.error,
+                leading: const Icon(Icons.delete_forever_outlined),
+                title: const Text('Delete from Google Drive'),
+                subtitle: const Text('Removes the file for good'),
+                onTap: () async {
+                  final navigator = Navigator.of(context);
+                  final deleted = await confirmAndDelete(context, [
+                    book,
+                  ], services);
+                  if (deleted.isNotEmpty) navigator.pop();
+                },
               ),
             ],
           ),

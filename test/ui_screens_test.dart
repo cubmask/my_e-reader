@@ -168,6 +168,45 @@ void main() {
       expect(find.textContaining('NEW IN YOUR DRIVE'), findsNothing);
     });
 
+    testWidgets('Duplicates are deleted after confirming on a $name', (
+      tester,
+    ) async {
+      Book copy(String id, int day) => Book(
+        driveFileId: id,
+        fileName: id == 'c1' ? 'Circe.epub' : 'Circe (1).epub',
+        format: BookFormat.epub,
+        folderPath: '',
+        md5: 'same',
+        createdTime: DateTime.utc(2026, 1, day),
+      );
+      final controller = await signedIn(
+        tester,
+        library: [...books, copy('c1', 1), copy('c2', 9)],
+      );
+      await pumpApp(tester, controller, size);
+      await tester.tap(find.text('Library').first);
+      await tester.pump();
+      // On a phone the chip is further along the scrolling row.
+      await tester.ensureVisible(find.text('Duplicates · 1'));
+      await tester.pump();
+      await tester.tap(find.text('Duplicates · 1'));
+      await tester.pumpAndSettle();
+      expect(find.text('Identical files'), findsOneWidget);
+
+      // The newer copy is ticked; the other can't be, so one stays.
+      await tester.tap(find.text('Delete 1 file'));
+      await tester.pumpAndSettle();
+      expect(find.text('Delete this file permanently?'), findsOneWidget);
+      await tester.tap(find.text('Delete'));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 200)),
+      );
+      await tester.pumpAndSettle();
+      expect(controller.books.map((b) => b.driveFileId), contains('c1'));
+      expect(controller.books.map((b) => b.driveFileId), isNot(contains('c2')));
+      expect(find.text('No duplicates in your library.'), findsOneWidget);
+    });
+
     testWidgets('Library lists every book on a $name', (tester) async {
       final controller = await signedIn(tester);
       await pumpApp(tester, controller, size);
