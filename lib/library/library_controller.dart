@@ -104,6 +104,8 @@ class LibraryController extends ChangeNotifier {
       _set(LibraryStatus.ready);
       // Fetch new versions of downloaded books in the background.
       unawaited(_services?.cache.refreshDownloads(_books));
+      // Look up details and covers of books not seen before.
+      unawaited(_services?.metadata.lookUpNew(_books));
     } catch (e) {
       _fail(e);
     }

@@ -39,6 +39,7 @@ class DriveLibrarySource implements LibrarySource {
             sizeBytes: int.tryParse(file.size ?? ''),
             modifiedTime: file.modifiedTime,
             thumbnailLink: file.thumbnailLink,
+            createdTime: file.createdTime,
           ),
         );
       }
@@ -55,7 +56,7 @@ class DriveLibrarySource implements LibrarySource {
     do {
       final page = await _api.files.list(
         q: "'$folderId' in parents and trashed = false",
-        $fields: 'nextPageToken, files(id, name, mimeType, size, modifiedTime, thumbnailLink)',
+        $fields: 'nextPageToken, files(id, name, mimeType, size, modifiedTime, createdTime, thumbnailLink)',
         pageSize: 1000,
         pageToken: pageToken,
         spaces: 'drive',

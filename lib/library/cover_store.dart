@@ -8,61 +8,109 @@ import 'package:path/path.dart' as p;
 
 import 'book.dart';
 
+/// Where a cover came from, best first.
+enum CoverKind {
+  /// Chosen by the user from an online search.
+  chosen('chosen'),
+
+  /// Read from the book itself when it was opened.
+  book('book'),
+
+  /// Found online by the automatic metadata lookup.
+  online('online'),
+
+  /// Drive's preview image (PDFs).
+  drive('drive');
+
+  const CoverKind(this.suffix);
+  final String suffix;
+}
+
 /// Cover images, kept on the device.
 ///
-/// A cover comes from the book itself the first time it is opened (EPUB,
-/// MOBI, FB2, comics), or from Drive's preview image (PDFs) for books not
-/// yet opened. A cover read from the book replaces a Drive preview.
+/// Covers arrive from several places (see [CoverKind]) and the best one
+/// available is shown: a cover the user picked, then the book's own, then
+/// one found online, then Drive's preview. Books with none get a typeset
+/// cover in the UI.
 class CoverStore extends ChangeNotifier {
-  CoverStore(this._dir, this._drive);
+  CoverStore(this._dir, this._drive, {http.Client? web})
+    : _web = web ?? http.Client();
 
   final Directory _dir;
+
+  /// Signed in to Google, for Drive previews only.
   final http.Client? _drive;
-  final _have = <String>{};
-  final _fromBook = <String>{};
+
+  /// Plain client for public covers, so the Google token never goes to
+  /// other sites.
+  final http.Client _web;
+
+  /// The kinds of cover on disk for each book.
+  final _have = <String, Set<CoverKind>>{};
   final _requested = <String>{};
   int _running = 0;
   final _queue = <Book>[];
 
   Future<void> load() async {
     if (!await _dir.exists()) return;
+    final kinds = {for (final k in CoverKind.values) '.${k.suffix}.jpg': k};
     await for (final entity in _dir.list()) {
       final name = p.basename(entity.path);
-      if (name.endsWith('.book.jpg')) {
-        final id = name.substring(0, name.length - '.book.jpg'.length);
-        _have.add(id);
-        _fromBook.add(id);
-      } else if (name.endsWith('.jpg')) {
-        _have.add(name.substring(0, name.length - '.jpg'.length));
+      for (final MapEntry(key: ending, value: kind) in kinds.entries) {
+        if (name.endsWith(ending)) {
+          final id = name.substring(0, name.length - ending.length);
+          (_have[id] ??= {}).add(kind);
+        }
       }
     }
     notifyListeners();
   }
 
-  File _file(String id, {required bool fromBook}) =>
-      File(p.join(_dir.path, fromBook ? '$id.book.jpg' : '$id.jpg'));
+  File _file(String id, CoverKind kind) =>
+      File(p.join(_dir.path, '$id.${kind.suffix}.jpg'));
 
-  /// The cover image for [book], if there is one yet. Asks Drive for its
-  /// preview in the background when there is none.
-  File? coverOf(Book book) {
-    final id = book.driveFileId;
-    if (_fromBook.contains(id)) return _file(id, fromBook: true);
-    if (_have.contains(id)) return _file(id, fromBook: false);
-    _fetchThumbnail(book);
-    return null;
+  CoverKind? bestKind(String id) {
+    final kinds = _have[id];
+    if (kinds == null) return null;
+    return CoverKind.values.where(kinds.contains).firstOrNull;
   }
 
-  /// Saves the cover read from the book itself.
-  Future<void> saveFromBook(String id, Uint8List bytes) async {
+  /// The best cover image for [book], if there is one yet. Asks Drive for its
+  /// preview in the background when there is none.
+  File? coverOf(Book book) {
+    final kind = bestKind(book.driveFileId);
+    if (kind == null) _fetchThumbnail(book);
+    return kind == null ? null : _file(book.driveFileId, kind);
+  }
+
+  Future<void> save(String id, CoverKind kind, Uint8List bytes) async {
     await _dir.create(recursive: true);
-    final file = _file(id, fromBook: true);
+    final file = _file(id, kind);
     await file.writeAsBytes(bytes);
     await FileImage(file).evict();
-    final thumb = _file(id, fromBook: false);
-    if (await thumb.exists()) await thumb.delete();
-    _have.add(id);
-    _fromBook.add(id);
+    (_have[id] ??= {}).add(kind);
     notifyListeners();
+  }
+
+  /// Downloads [url] as the book's cover of [kind]. Returns false when it
+  /// can't be fetched or isn't an image.
+  Future<bool> saveFromUrl(String id, CoverKind kind, Uri url) async {
+    final client = kind == CoverKind.drive ? _drive : _web;
+    if (client == null) return false;
+    try {
+      final response = await client.get(url);
+      final type = response.headers['content-type'] ?? '';
+      // Open Library answers a missing cover with a tiny placeholder.
+      if (response.statusCode != 200 ||
+          !type.startsWith('image/') ||
+          response.bodyBytes.length < 1000) {
+        return false;
+      }
+      await save(id, kind, response.bodyBytes);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   void _fetchThumbnail(Book book) {
@@ -80,30 +128,18 @@ class CoverStore extends ChangeNotifier {
     while (_running < 3 && _queue.isNotEmpty) {
       final book = _queue.removeLast();
       _running++;
+      // Drive's links end in a size such as =s220; ask for a sharper one.
+      final link = book.thumbnailLink!.replaceFirst(RegExp(r'=s\d+$'), '=s800');
       unawaited(
-        _download(book).whenComplete(() {
+        saveFromUrl(
+          book.driveFileId,
+          CoverKind.drive,
+          Uri.parse(link),
+        ).whenComplete(() {
           _running--;
           _pump();
         }),
       );
-    }
-  }
-
-  Future<void> _download(Book book) async {
-    try {
-      // Drive's links end in a size such as =s220; ask for a sharper one.
-      final link = book.thumbnailLink!.replaceFirst(RegExp(r'=s\d+$'), '=s800');
-      final response = await _drive!.get(Uri.parse(link));
-      if (response.statusCode != 200) return;
-      await _dir.create(recursive: true);
-      await _file(
-        book.driveFileId,
-        fromBook: false,
-      ).writeAsBytes(response.bodyBytes);
-      _have.add(book.driveFileId);
-      notifyListeners();
-    } catch (_) {
-      // Offline: the generated cover stays until the next launch.
     }
   }
 }

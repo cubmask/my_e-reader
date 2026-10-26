@@ -7,6 +7,7 @@ import 'package:pdfrx/pdfrx.dart';
 
 import '../core/book_format.dart';
 import '../library/book.dart';
+import '../library/cover_store.dart' show CoverKind;
 import '../notes/annotation_store.dart';
 import '../ui/breakpoints.dart';
 import 'book_cache.dart';
@@ -396,7 +397,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
         }),
         onError: (message) => setState(() => _error = message),
         onToggleControls: _toggleControls,
-        onCover: (jpeg) => services.covers.saveFromBook(book.driveFileId, jpeg),
+        onCover: (jpeg) =>
+            services.covers.save(book.driveFileId, CoverKind.book, jpeg),
       ),
     );
   }

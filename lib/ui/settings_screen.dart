@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../library/library_controller.dart';
+import '../library/metadata_updater.dart';
 import '../reader/book_cache.dart';
 import 'library_screen.dart' show largeTitle;
 
@@ -23,6 +24,8 @@ class SettingsScreen extends StatelessWidget {
             title: const Text('Library folder'),
             subtitle: Text(controller.folderId ?? 'Not set'),
           ),
+          if (controller.services?.metadata case final metadata?)
+            _MetadataSection(metadata: metadata, controller: controller),
           if (controller.services?.cache case final cache?)
             _StorageSection(cache: cache),
           if (controller.status != LibraryStatus.signedOut)
@@ -33,6 +36,52 @@ class SettingsScreen extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// Calibre-style automatic book details and covers.
+class _MetadataSection extends StatelessWidget {
+  const _MetadataSection({required this.metadata, required this.controller});
+
+  final MetadataUpdater metadata;
+  final LibraryController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: metadata,
+      builder: (context, _) {
+        final (done, total) = metadata.progress;
+        return Column(
+          children: [
+            SwitchListTile(
+              secondary: const Icon(Icons.auto_awesome_outlined),
+              title: const Text('Find book details and covers online'),
+              subtitle: Text(
+                metadata.running
+                    ? 'Looking up new books: $done of $total'
+                    : 'New books are matched with Google Books and Open '
+                          'Library. Details you typed are never replaced.',
+              ),
+              value: metadata.auto,
+              onChanged: (value) async {
+                await metadata.setAuto(value);
+                if (value) {
+                  await metadata.lookUpNew(controller.books);
+                }
+              },
+            ),
+            if (metadata.running)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: LinearProgressIndicator(
+                  value: total == 0 ? null : done / total,
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }

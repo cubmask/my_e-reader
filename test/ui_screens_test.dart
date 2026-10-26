@@ -8,6 +8,9 @@ import 'package:ebook_reader/library/book_meta_store.dart';
 import 'package:ebook_reader/library/cover_store.dart';
 import 'package:ebook_reader/library/library_controller.dart';
 import 'package:ebook_reader/library/library_source.dart';
+import 'package:ebook_reader/library/metadata_sources.dart';
+import 'package:ebook_reader/library/metadata_updater.dart';
+import 'package:ebook_reader/library/new_books.dart';
 import 'package:ebook_reader/notes/annotation_store.dart';
 import 'package:ebook_reader/notes/ink_store.dart';
 import 'package:ebook_reader/reader/book_cache.dart';
@@ -57,20 +60,33 @@ final books = [
 
 /// Signs in with fake services and a fake Drive folder, with some reading
 /// progress so Home has something to show.
-Future<LibraryController> signedIn(WidgetTester tester) async {
+Future<LibraryController> signedIn(
+  WidgetTester tester, {
+  List<Book>? library,
+}) async {
   late LibraryController controller;
   await tester.runAsync(() async {
     SharedPreferences.setMockInitialValues({'library.folderId': 'root'});
     final dir = await Directory.systemTemp.createTemp('ui');
     addTearDown(() => dir.delete(recursive: true));
     final api = drive.DriveApi(MockClient((_) async => http.Response('', 404)));
+    final meta = BookMetaStore(File('${dir.path}/m.json'), null);
+    final covers = CoverStore(Directory('${dir.path}/covers'), null);
+    final metadata = MetadataUpdater(
+      MetadataService(MockClient((_) async => http.Response('', 404))),
+      meta,
+      covers,
+    );
+    await metadata.setAuto(false);
     final services = ReaderServices(
       cache: BookCache(api, Directory('${dir.path}/books')),
       progress: ProgressStore(File('${dir.path}/p.json'), null),
       annotations: AnnotationStore(File('${dir.path}/a.json'), null),
-      meta: BookMetaStore(File('${dir.path}/m.json'), null),
+      meta: meta,
       ink: InkStore(null, null),
-      covers: CoverStore(Directory('${dir.path}/covers'), null),
+      covers: covers,
+      metadata: metadata,
+      newBooks: NewBooks(),
       server: ReaderServer(),
       settings: ReaderSettings(),
     );
@@ -95,7 +111,7 @@ Future<LibraryController> signedIn(WidgetTester tester) async {
     }
     controller = LibraryController(
       auth: _FakeAuth(),
-      sourceFactory: (_, _) => _FakeSource(books),
+      sourceFactory: (_, _) => _FakeSource(library ?? books),
       servicesFactory: (_) async => services,
     );
     await controller.signIn();
@@ -127,7 +143,29 @@ void main() {
       // Piranesi was read most recently.
       expect(find.text('Piranesi'), findsWidgets);
       expect(find.text('Recent'), findsOneWidget);
-      expect(find.text('New in your library'), findsOneWidget);
+      expect(find.text('Not started yet'), findsOneWidget);
+      // Nothing arrived in Drive lately, so there is no hero.
+      expect(find.textContaining('NEW IN YOUR DRIVE'), findsNothing);
+    });
+
+    testWidgets('Home highlights books new in Drive on a $name', (
+      tester,
+    ) async {
+      final added = Book(
+        driveFileId: 'n1',
+        fileName: 'The Ministry of Time.epub',
+        format: BookFormat.epub,
+        folderPath: '',
+        createdTime: DateTime.now().subtract(const Duration(days: 1)),
+      );
+      final controller = await signedIn(tester, library: [...books, added]);
+      await pumpApp(tester, controller, size);
+      expect(find.text('NEW IN YOUR DRIVE'), findsOneWidget);
+      expect(find.text('The Ministry of Time'), findsWidgets);
+
+      await tester.tap(find.text('Dismiss'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('NEW IN YOUR DRIVE'), findsNothing);
     });
 
     testWidgets('Library lists every book on a $name', (tester) async {

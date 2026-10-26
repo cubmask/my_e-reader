@@ -7,14 +7,24 @@ import 'package:flutter/foundation.dart';
 import '../reader/progress_store.dart' show ProgressRemote;
 import 'book.dart';
 
-/// Details the user (or the book's own metadata) gives a book, beyond what
-/// Drive knows: a proper title, an author and the collections it is in.
+/// Details the user, the book itself or an online source gives a book,
+/// beyond what Drive knows: a proper title and author, collections, and the
+/// descriptive details Calibre would fetch (description, publisher, ISBN...).
 @immutable
 class BookMeta {
   const BookMeta({
     this.title = '',
     this.author = '',
     this.collections = const [],
+    this.description = '',
+    this.publisher = '',
+    this.published = '',
+    this.isbn = '',
+    this.subjects = const [],
+    this.pageCount,
+    this.rating,
+    this.source = '',
+    this.lookedUpAt,
     required this.updatedAt,
   });
 
@@ -22,12 +32,68 @@ class BookMeta {
   final String title;
   final String author;
   final List<String> collections;
+  final String description;
+  final String publisher;
+
+  /// Publication date as the source gives it, often just a year.
+  final String published;
+  final String isbn;
+  final List<String> subjects;
+  final int? pageCount;
+
+  /// Average reader rating out of 5.
+  final double? rating;
+
+  /// Where the online details came from, such as "Google Books".
+  final String source;
+
+  /// When the details were last looked up online, matched or not, so the
+  /// automatic lookup doesn't repeat for every refresh.
+  final DateTime? lookedUpAt;
   final DateTime updatedAt;
+
+  BookMeta copyWith({
+    String? title,
+    String? author,
+    List<String>? collections,
+    String? description,
+    String? publisher,
+    String? published,
+    String? isbn,
+    List<String>? subjects,
+    int? pageCount,
+    double? rating,
+    String? source,
+    DateTime? lookedUpAt,
+  }) => BookMeta(
+    title: (title ?? this.title).trim(),
+    author: (author ?? this.author).trim(),
+    collections: collections ?? this.collections,
+    description: description ?? this.description,
+    publisher: publisher ?? this.publisher,
+    published: published ?? this.published,
+    isbn: isbn ?? this.isbn,
+    subjects: subjects ?? this.subjects,
+    pageCount: pageCount ?? this.pageCount,
+    rating: rating ?? this.rating,
+    source: source ?? this.source,
+    lookedUpAt: lookedUpAt ?? this.lookedUpAt,
+    updatedAt: DateTime.now(),
+  );
 
   Map<String, Object> toJson() => {
     if (title.isNotEmpty) 'title': title,
     if (author.isNotEmpty) 'author': author,
     if (collections.isNotEmpty) 'collections': collections,
+    if (description.isNotEmpty) 'description': description,
+    if (publisher.isNotEmpty) 'publisher': publisher,
+    if (published.isNotEmpty) 'published': published,
+    if (isbn.isNotEmpty) 'isbn': isbn,
+    if (subjects.isNotEmpty) 'subjects': subjects,
+    'pageCount': ?pageCount,
+    'rating': ?rating,
+    if (source.isNotEmpty) 'source': source,
+    if (lookedUpAt != null) 'lookedUpAt': lookedUpAt!.toUtc().toIso8601String(),
     'updatedAt': updatedAt.toUtc().toIso8601String(),
   };
 
@@ -35,17 +101,27 @@ class BookMeta {
     if (json is! Map) return null;
     final updatedAt = DateTime.tryParse('${json['updatedAt']}');
     if (updatedAt == null) return null;
-    final title = json['title'];
-    final author = json['author'];
-    final collections = json['collections'];
+    String text(String key) => json[key] is String ? json[key] as String : '';
+    List<String> list(String key) => [
+      if (json[key] case final List items)
+        for (final c in items)
+          if (c is String && c.isNotEmpty) c,
+    ];
+    final pages = json['pageCount'];
+    final rating = json['rating'];
     return BookMeta(
-      title: title is String ? title : '',
-      author: author is String ? author : '',
-      collections: [
-        if (collections is List)
-          for (final c in collections)
-            if (c is String && c.isNotEmpty) c,
-      ],
+      title: text('title'),
+      author: text('author'),
+      collections: list('collections'),
+      description: text('description'),
+      publisher: text('publisher'),
+      published: text('published'),
+      isbn: text('isbn'),
+      subjects: list('subjects'),
+      pageCount: pages is int ? pages : null,
+      rating: rating is num ? rating.toDouble() : null,
+      source: text('source'),
+      lookedUpAt: DateTime.tryParse('${json['lookedUpAt']}'),
       updatedAt: updatedAt,
     );
   }
@@ -140,13 +216,19 @@ class BookMetaStore extends ChangeNotifier {
     String? author,
     List<String>? collections,
   }) async {
-    final old = _meta[driveFileId];
-    _meta[driveFileId] = BookMeta(
-      title: (title ?? old?.title ?? '').trim(),
-      author: (author ?? old?.author ?? '').trim(),
-      collections: collections ?? old?.collections ?? const [],
-      updatedAt: DateTime.now(),
+    await put(
+      driveFileId,
+      (_meta[driveFileId] ?? BookMeta(updatedAt: DateTime.now())).copyWith(
+        title: title,
+        author: author,
+        collections: collections,
+      ),
     );
+  }
+
+  /// Stores [meta] for the book as a whole, for example online details.
+  Future<void> put(String driveFileId, BookMeta meta) async {
+    _meta[driveFileId] = meta;
     notifyListeners();
     await _saveLocal();
     _pushTimer?.cancel();
