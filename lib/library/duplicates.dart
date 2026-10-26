@@ -1,3 +1,6 @@
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'book.dart';
 
 /// Books that look like copies of one another.
@@ -15,6 +18,9 @@ class DuplicateGroup {
   /// all but the first; for books that only share a title, none, since a
   /// second format may be wanted.
   List<Book> get suggested => identical ? books.sublist(1) : const [];
+
+  /// Every copy but the one to keep.
+  List<Book> get extras => books.sublist(1);
 }
 
 /// Groups the books in [books] that are duplicates: files with the same
@@ -112,4 +118,35 @@ String normalizeTitle(String title) {
 String _surname(String author) {
   final first = author.split(RegExp(r'[,;&]| and ')).first.trim();
   return first.split(RegExp(r'\s+')).last.toLowerCase();
+}
+
+/// Remembers which duplicates the user has seen and dismissed, so Home
+/// only raises an alert when new ones turn up.
+class DuplicateAlerts extends ChangeNotifier {
+  static const _key = 'duplicates.dismissed';
+  final _dismissed = <String>{};
+
+  Future<void> load() async {
+    final prefs = await SharedPreferences.getInstance();
+    _dismissed.addAll(prefs.getStringList(_key) ?? const []);
+    notifyListeners();
+  }
+
+  static String _signature(DuplicateGroup g) =>
+      (g.books.map((b) => b.driveFileId).toList()..sort()).join(',');
+
+  /// The groups not dismissed yet.
+  List<DuplicateGroup> unseen(List<DuplicateGroup> groups) => [
+    for (final g in groups)
+      if (!_dismissed.contains(_signature(g))) g,
+  ];
+
+  Future<void> dismiss(Iterable<DuplicateGroup> groups) async {
+    _dismissed.addAll(groups.map(_signature));
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setStringList(
+      _key,
+      _dismissed.toList(),
+    );
+  }
 }

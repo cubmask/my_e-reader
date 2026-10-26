@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../library/book_meta_store.dart';
 import '../library/cover_store.dart';
+import '../library/duplicates.dart';
 import '../library/metadata_sources.dart';
 import '../library/metadata_updater.dart';
 import '../library/new_books.dart';
@@ -28,9 +29,10 @@ class ReaderServices {
     required this.covers,
     required this.metadata,
     required this.newBooks,
+    DuplicateAlerts? duplicates,
     required this.server,
     required this.settings,
-  });
+  }) : duplicates = duplicates ?? DuplicateAlerts();
 
   final BookCache cache;
   final ProgressStore progress;
@@ -40,6 +42,7 @@ class ReaderServices {
   final CoverStore covers;
   final MetadataUpdater metadata;
   final NewBooks newBooks;
+  final DuplicateAlerts duplicates;
   final ReaderServer server;
   final ReaderSettings settings;
 
@@ -97,6 +100,7 @@ class ReaderServices {
       services.covers.load(),
       services.metadata.load(),
       services.newBooks.load(),
+      services.duplicates.load(),
       services.settings.load(),
     ]);
     return services;

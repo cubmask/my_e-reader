@@ -42,7 +42,21 @@ class _DuplicatesScreenState extends State<DuplicatesScreen> {
   Widget build(BuildContext context) {
     final services = widget.controller.services;
     return Scaffold(
-      appBar: AppBar(title: const Text('Duplicates')),
+      appBar: AppBar(
+        title: const Text('Duplicates'),
+        actions: [
+          if (services != null)
+            TextButton(
+              onPressed: () => setState(() {
+                _picked = {
+                  for (final g in duplicatesIn(widget.controller))
+                    for (final b in g.extras) b.driveFileId,
+                };
+              }),
+              child: const Text('Tick all extra copies'),
+            ),
+        ],
+      ),
       body: services == null
           ? const SizedBox()
           : ListenableBuilder(
