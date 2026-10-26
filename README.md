@@ -9,7 +9,9 @@ The full architecture and roadmap are in the
 
 ## Status
 
-Phase 3 adds notes and read-aloud:
+Phase 4 starts with office documents. DOC, DOCX, RTF and ODT files are converted by Google Drive on first open: the app makes a temporary Google Docs copy, exports it as EPUB, deletes the copy and caches the EPUB. Everything else (highlights, read aloud, spreads) then works as for any EPUB. This needs the extra `drive.file` permission, so Google asks for consent once more after updating. Very large documents (over Drive's 10 MB export limit) can't be converted.
+
+Phase 3 added notes and read-aloud:
 
 - Select text to highlight it in yellow, green, blue or pink, with an optional note. Tap a highlight to recolour, edit or delete it.
 - Bookmark any page, including PDF pages. The notes button lists the book's highlights and bookmarks.
@@ -28,8 +30,6 @@ Phase 1 (MVP reader) added:
 - Reading position saves on every page turn and syncs to a hidden `progress.json` in Drive's app data folder, so every device resumes at the same place.
 
 Phase 0 laid the groundwork: the adaptive shell, Google sign-in, the Drive library with search and format filters, and format detection for every planned type.
-
-The office formats (DOC, DOCX, RTF, ODT) show a "phase 4" notice for now.
 
 The reader page (`assets/reader/`) bundles [foliate-js](https://github.com/johnfactotum/foliate-js) (MIT, see `assets/reader/foliate/VERSION`) plus the DjVu and RAR libraries listed in `assets/reader/vendor/README.md` and is served from a loopback-only server with a random path token. A Content Security Policy blocks scripts inside books.
 

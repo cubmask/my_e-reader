@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:ebook_reader/core/book_format.dart';
@@ -67,5 +68,48 @@ void main() {
     expect(a.existsSync(), isFalse);
     expect(b.existsSync(), isTrue);
     expect(c.existsSync(), isTrue);
+  });
+
+  test('office documents are converted to EPUB by Drive', () async {
+    final calls = <String>[];
+    final client = MockClient((request) async {
+      calls.add('${request.method} ${request.url.path}');
+      if (request.url.path.endsWith('/copy')) {
+        expect(
+          jsonDecode(request.body)['mimeType'],
+          'application/vnd.google-apps.document',
+        );
+        return http.Response(
+          '{"id":"tmp"}',
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (request.url.path.endsWith('/export')) {
+        expect(request.url.queryParameters['mimeType'], 'application/epub+zip');
+        return http.Response.bytes(
+          List.filled(10, 1),
+          200,
+          headers: {'content-type': 'application/epub+zip'},
+        );
+      }
+      return http.Response('', 204);
+    });
+    final office = BookCache(drive.DriveApi(client), dir);
+    final file = await office.open(
+      Book(
+        driveFileId: 'w',
+        fileName: 'Notes.docx',
+        format: BookFormat.docx,
+        folderPath: '',
+      ),
+    );
+    expect(file.path, endsWith('.epub'));
+    expect(await file.length(), 10);
+    expect(calls, [
+      'POST /drive/v3/files/w/copy',
+      'GET /drive/v3/files/tmp/export',
+      'DELETE /drive/v3/files/tmp',
+    ]);
   });
 }

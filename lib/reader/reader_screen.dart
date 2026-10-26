@@ -15,23 +15,6 @@ import 'reader_services.dart';
 import 'reader_settings.dart';
 import 'web_book_view.dart';
 
-/// Formats the web reader opens: foliate-js plus our DjVu and archive loaders.
-const _webFormats = {
-  BookFormat.epub,
-  BookFormat.mobi,
-  BookFormat.azw3,
-  BookFormat.fb2,
-  BookFormat.txt,
-  BookFormat.cbz,
-  BookFormat.cbr,
-  BookFormat.zip,
-  BookFormat.rar,
-  BookFormat.djvu,
-};
-
-bool isReadable(BookFormat format) =>
-    format == BookFormat.pdf || _webFormats.contains(format);
-
 const highlightSwatches = {
   HighlightColor.yellow: Color(0xFFF9D71C),
   HighlightColor.green: Color(0xFF5FD068),
@@ -84,7 +67,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
     final saved = services.progress[book.driveFileId];
     _fraction = saved?.fraction ?? 0;
     _location = widget.openAt ?? saved?.location ?? '';
-    if (!isReadable(book.format)) return;
     services.cache
         .open(book, onProgress: (v) => setState(() => _download = v))
         .then(
@@ -298,12 +280,6 @@ class _ReaderScreenState extends State<ReaderScreen> {
   };
 
   Widget _buildBody(bool spread) {
-    if (!isReadable(book.format)) {
-      return _Notice(
-        '${book.format.label} files open once office document support '
-        'arrives in phase 4.',
-      );
-    }
     if (_error != null) return _Notice('Could not open this book.\n$_error');
     final file = _file;
     if (file == null) {
@@ -316,7 +292,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
               child: LinearProgressIndicator(value: _download),
             ),
             const SizedBox(height: 12),
-            const Text('Downloading from Google Drive'),
+            Text(
+              book.format.needsConversion
+                  ? 'Converting with Google Drive'
+                  : 'Downloading from Google Drive',
+            ),
           ],
         ),
       );
@@ -337,7 +317,10 @@ class _ReaderScreenState extends State<ReaderScreen> {
     return SafeArea(
       child: WebBookView(
         file: file,
-        fileName: book.fileName,
+        // Converted office documents are EPUBs.
+        fileName: book.format.needsConversion
+            ? '${book.displayTitle}.epub'
+            : book.fileName,
         format: book.format,
         server: services.server,
         controller: _web,
