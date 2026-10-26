@@ -8,6 +8,7 @@ import '../core/book_format.dart';
 import '../library/book.dart';
 import '../notes/annotation_store.dart';
 import '../ui/breakpoints.dart';
+import 'ink_layer.dart';
 import 'pdf_book_view.dart';
 import 'progress_store.dart';
 import 'read_aloud.dart';
@@ -45,6 +46,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   final _web = WebBookController();
   final _pdf = PdfViewerController();
   final _readAloud = ReadAloud();
+  final _ink = InkController();
   File? _file;
   double? _download;
   String? _error;
@@ -78,6 +80,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
   @override
   void dispose() {
     _readAloud.dispose();
+    _ink.dispose();
+    services.ink.flush();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     services.progress.flush();
     annotations.flush();
@@ -245,13 +249,30 @@ class _ReaderScreenState extends State<ReaderScreen> {
               box.maxWidth > box.maxHeight &&
               box.maxWidth >= Breakpoints.expanded;
           return ListenableBuilder(
-            listenable: _readAloud,
+            listenable: Listenable.merge([_readAloud, _ink]),
             builder: (context, _) => Stack(
               children: [
                 Positioned.fill(child: _buildBody(spread)),
                 if (_controls || _readAloud.active)
                   Positioned(top: 0, left: 0, right: 0, child: _buildTopBar()),
-                if (_selection != null)
+                if (_ink.enabled)
+                  Positioned(
+                    bottom: 24,
+                    left: 0,
+                    right: 0,
+                    child: SafeArea(
+                      child: Center(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: InkToolbar(
+                            controller: _ink,
+                            store: services.ink,
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                else if (_selection != null)
                   Positioned(
                     bottom: 24,
                     left: 0,
@@ -309,6 +330,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
           initialPage: _initialPdfPage,
           spread: spread,
           onToggleControls: _toggleControls,
+          bookId: book.driveFileId,
+          ink: services.ink,
+          inkController: _ink,
           onPageChanged: (page, count) =>
               _save('page:$page', count <= 1 ? 1 : (page - 1) / (count - 1)),
         ),
@@ -398,6 +422,14 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   ),
                   onPressed: _toggleBookmark,
                 ),
+                if (_isPdf)
+                  IconButton(
+                    tooltip: _ink.enabled ? 'Stop writing' : 'Write with pen',
+                    isSelected: _ink.enabled,
+                    icon: const Icon(Icons.draw_outlined),
+                    selectedIcon: const Icon(Icons.draw),
+                    onPressed: () => _ink.enabled = !_ink.enabled,
+                  ),
                 IconButton(
                   tooltip: 'Notes and highlights',
                   icon: const Icon(Icons.sticky_note_2_outlined),

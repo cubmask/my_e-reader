@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:pdfrx/pdfrx.dart';
 
+import '../notes/ink_store.dart';
+import 'ink_layer.dart';
 import 'pdf_spread.dart';
 import 'read_aloud.dart';
 
@@ -16,9 +18,15 @@ class PdfBookView extends StatefulWidget {
     required this.spread,
     required this.onPageChanged,
     required this.onToggleControls,
+    required this.bookId,
+    required this.ink,
+    required this.inkController,
   });
 
   final File file;
+  final String bookId;
+  final InkStore ink;
+  final InkController inkController;
   final PdfViewerController controller;
   final int initialPage;
   final bool spread;
@@ -64,6 +72,15 @@ class _PdfBookViewState extends State<PdfBookView> {
             widget.onPageChanged(page, _controller.pageCount);
           }
         },
+        pageOverlaysBuilder: (context, rect, page) => [
+          InkPageLayer(
+            key: ValueKey(page.pageNumber),
+            bookId: widget.bookId,
+            page: page.pageNumber,
+            store: widget.ink,
+            controller: widget.inkController,
+          ),
+        ],
         onGeneralTap: (context, controller, details) {
           if (details.type != PdfViewerGeneralTapType.tap) return false;
           widget.onToggleControls();
