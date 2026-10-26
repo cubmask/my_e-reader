@@ -9,6 +9,8 @@ The full architecture and roadmap are in the
 
 ## Status
 
+Books now stream from Google Drive instead of being stored automatically. PDFs page in straight from Drive through HTTP range requests, relayed by the loopback server, so a large PDF opens without downloading all of it. Other formats need the whole file, so they go to a temporary streaming cache that is trimmed past 300 MB. To keep a book for offline reading, tap the download button in the reader or use *Download* in the book's details (long-press its card). Downloaded books show a tick on their card and are never evicted. A *Downloaded* filter lists them, and Settings shows the space used, with options to remove all downloads or clear the streaming cache. A downloaded book that changes in Drive is fetched again when the library refreshes.
+
 Phase 4 starts with office documents. DOC, DOCX, RTF and ODT files are converted by Google Drive on first open: the app makes a temporary Google Docs copy, exports it as EPUB, deletes the copy and caches the EPUB. Everything else (highlights, read aloud, spreads) then works as for any EPUB. This needs the extra `drive.file` permission, so Google asks for consent once more after updating. Very large documents (over Drive's 10 MB export limit) can't be converted.
 
 The library now shows real titles and authors. Opening a book fills them in from its own metadata, and a long press (or right click) on a card edits the title, author and collections. Collections appear as chips above the format filters; long-press one to rename or delete it. These details sync through a hidden `library.json` in Drive's app data folder.
@@ -27,7 +29,6 @@ Phase 2 added DjVu (rendered with DjVu.js), CBR and RAR (UnRAR compiled to WebAs
 
 Phase 1 (MVP reader) added:
 
-- Books download from Drive on first open and stay cached for offline reading (2 GB, least recently opened evicted first).
 - EPUB, MOBI, AZW3, FB2, TXT and CBZ open in a foliate-js reader inside a WebView, with tap zones, keyboard paging, contents, light/sepia/dark themes and text size.
 - PDF opens in a native PDFium viewer.
 - On a landscape tablet or desktop, books and PDFs show as two-page spreads.

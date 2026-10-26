@@ -36,6 +36,14 @@ class ReaderServices {
   static Future<ReaderServices> create(http.Client client) async {
     final api = drive.DriveApi(client);
     final dir = await getApplicationSupportDirectory();
+    // Blocks of PDFs streamed in an earlier session; their URLs change with
+    // every launch, so they are never reused.
+    final pdfBlocks = Directory(
+      p.join((await getTemporaryDirectory()).path, 'pdfrx.cache'),
+    );
+    if (await pdfBlocks.exists()) {
+      await pdfBlocks.delete(recursive: true).catchError((_) => pdfBlocks);
+    }
     final services = ReaderServices(
       cache: BookCache(api, Directory(p.join(dir.path, 'books'))),
       progress: ProgressStore(
@@ -54,7 +62,7 @@ class ReaderServices {
         File(p.join(dir.path, 'ink.json')),
         DriveAppDataRemote(api, 'ink.json'),
       ),
-      server: ReaderServer(),
+      server: ReaderServer(drive: client),
       settings: ReaderSettings(),
     );
     await Future.wait([
@@ -62,6 +70,7 @@ class ReaderServices {
       services.annotations.load(),
       services.meta.load(),
       services.ink.load(),
+      services.cache.load(),
       services.settings.load(),
     ]);
     return services;

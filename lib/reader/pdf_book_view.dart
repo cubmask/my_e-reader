@@ -13,6 +13,7 @@ class PdfBookView extends StatefulWidget {
   const PdfBookView({
     super.key,
     required this.file,
+    this.streamUrl,
     required this.controller,
     required this.initialPage,
     required this.spread,
@@ -23,7 +24,11 @@ class PdfBookView extends StatefulWidget {
     required this.inkController,
   });
 
-  final File file;
+  /// The local copy, or null when streaming from [streamUrl].
+  final File? file;
+
+  /// A URL that answers range requests, so pages load as they are needed.
+  final Uri? streamUrl;
   final String bookId;
   final InkStore ink;
   final InkController inkController;
@@ -50,43 +55,55 @@ class _PdfBookViewState extends State<PdfBookView> {
 
   @override
   Widget build(BuildContext context) {
+    final params = PdfViewerParams(
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
+      layoutPages: widget.spread
+          ? (pages, params) {
+              final layout = spreadLayout([
+                for (final p in pages) Size(p.width, p.height),
+              ], params.margin);
+              return PdfPageLayout(
+                pageLayouts: layout.rects,
+                documentSize: layout.size,
+              );
+            }
+          : null,
+      onPageChanged: (page) {
+        if (page != null && _controller.isReady) {
+          widget.onPageChanged(page, _controller.pageCount);
+        }
+      },
+      pageOverlaysBuilder: (context, rect, page) => [
+        InkPageLayer(
+          key: ValueKey(page.pageNumber),
+          bookId: widget.bookId,
+          page: page.pageNumber,
+          store: widget.ink,
+          controller: widget.inkController,
+        ),
+      ],
+      onGeneralTap: (context, controller, details) {
+        if (details.type != PdfViewerGeneralTapType.tap) return false;
+        widget.onToggleControls();
+        return true;
+      },
+    );
+    final url = widget.streamUrl;
+    if (url != null) {
+      return PdfViewer.uri(
+        url,
+        controller: _controller,
+        initialPageNumber: widget.initialPage,
+        preferRangeAccess: true,
+        timeout: const Duration(seconds: 30),
+        params: params,
+      );
+    }
     return PdfViewer.file(
-      widget.file.path,
+      widget.file!.path,
       controller: _controller,
       initialPageNumber: widget.initialPage,
-      params: PdfViewerParams(
-        backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
-        layoutPages: widget.spread
-            ? (pages, params) {
-                final layout = spreadLayout([
-                  for (final p in pages) Size(p.width, p.height),
-                ], params.margin);
-                return PdfPageLayout(
-                  pageLayouts: layout.rects,
-                  documentSize: layout.size,
-                );
-              }
-            : null,
-        onPageChanged: (page) {
-          if (page != null && _controller.isReady) {
-            widget.onPageChanged(page, _controller.pageCount);
-          }
-        },
-        pageOverlaysBuilder: (context, rect, page) => [
-          InkPageLayer(
-            key: ValueKey(page.pageNumber),
-            bookId: widget.bookId,
-            page: page.pageNumber,
-            store: widget.ink,
-            controller: widget.inkController,
-          ),
-        ],
-        onGeneralTap: (context, controller, details) {
-          if (details.type != PdfViewerGeneralTapType.tap) return false;
-          widget.onToggleControls();
-          return true;
-        },
-      ),
+      params: params,
     );
   }
 }

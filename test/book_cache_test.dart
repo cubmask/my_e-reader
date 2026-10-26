@@ -37,7 +37,7 @@ void main() {
         },
       );
     });
-    cache = BookCache(drive.DriveApi(client), dir, maxBytes: 250);
+    cache = BookCache(drive.DriveApi(client), dir, streamMaxBytes: 250);
   });
   tearDown(() => dir.delete(recursive: true));
 
@@ -68,6 +68,65 @@ void main() {
     expect(a.existsSync(), isFalse);
     expect(b.existsSync(), isTrue);
     expect(c.existsSync(), isTrue);
+  });
+
+  test('a download is kept, survives trimming and can be removed', () async {
+    final a = _book('a', 1);
+    final streamed = await cache.open(a);
+    expect(cache.isDownloaded(a), isFalse);
+
+    await cache.download(a);
+    expect(downloads, 1, reason: 'the streamed copy is moved, not refetched');
+    expect(streamed.existsSync(), isFalse);
+    expect(cache.isDownloaded(a), isTrue);
+    expect(cache.isAvailableOffline(a), isTrue);
+    final kept = await cache.open(a);
+    expect(kept.parent.path, cache.downloads.path);
+
+    for (final id in ['b', 'c', 'd']) {
+      await cache.open(_book(id, 1));
+    }
+    expect(kept.existsSync(), isTrue);
+    expect((await cache.usage()).downloads, 100);
+
+    final reloaded = BookCache(
+      drive.DriveApi(
+        MockClient((_) async {
+          throw StateError('no network');
+        }),
+      ),
+      dir,
+    );
+    await reloaded.load();
+    expect(reloaded.isDownloaded(a), isTrue);
+
+    await cache.removeDownload(a);
+    expect(cache.isDownloaded(a), isFalse);
+    expect(kept.existsSync(), isFalse);
+  });
+
+  test('a book changed in Drive is fetched again on refresh', () async {
+    await cache.download(_book('a', 1));
+    final newer = _book('a', 2);
+    expect(cache.isDownloaded(newer), isTrue);
+    expect(cache.isAvailableOffline(newer), isFalse);
+    await cache.refreshDownloads([newer]);
+    expect(downloads, 2);
+    expect(cache.isAvailableOffline(newer), isTrue);
+    expect(cache.isAvailableOffline(_book('a', 1)), isFalse);
+  });
+
+  test('only PDFs that are not downloaded stream directly', () async {
+    final pdf = Book(
+      driveFileId: 'p',
+      fileName: 'p.pdf',
+      format: BookFormat.pdf,
+      folderPath: '',
+    );
+    expect(cache.canStreamDirectly(pdf), isTrue);
+    expect(cache.canStreamDirectly(_book('a', 1)), isFalse);
+    await cache.download(pdf);
+    expect(cache.canStreamDirectly(pdf), isFalse);
   });
 
   test('office documents are converted to EPUB by Drive', () async {

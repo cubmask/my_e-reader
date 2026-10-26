@@ -8,6 +8,7 @@ import '../core/book_format.dart';
 import '../library/book.dart';
 import '../notes/annotation_store.dart';
 import '../ui/breakpoints.dart';
+import 'book_cache.dart';
 import 'ink_layer.dart';
 import 'pdf_book_view.dart';
 import 'progress_store.dart';
@@ -48,6 +49,10 @@ class _ReaderScreenState extends State<ReaderScreen> {
   final _readAloud = ReadAloud();
   final _ink = InkController();
   File? _file;
+
+  /// Set instead of [_file] when a PDF is paged in straight from Drive.
+  Uri? _streamUrl;
+  bool get _ready => _file != null || _streamUrl != null;
   double? _download;
   String? _error;
   bool _controls = true;
@@ -69,6 +74,12 @@ class _ReaderScreenState extends State<ReaderScreen> {
     final saved = services.progress[book.driveFileId];
     _fraction = saved?.fraction ?? 0;
     _location = widget.openAt ?? saved?.location ?? '';
+    if (services.cache.canStreamDirectly(book)) {
+      services.server
+          .driveUrl(book.driveFileId)
+          .then((url) => setState(() => _streamUrl = url));
+      return;
+    }
     services.cache
         .open(book, onProgress: (v) => setState(() => _download = v))
         .then(
@@ -279,7 +290,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
                     right: 0,
                     child: Center(child: _buildSelectionBar()),
                   )
-                else if (_file != null && (_controls || _readAloud.active))
+                else if (_ready && (_controls || _readAloud.active))
                   Positioned(
                     bottom: 0,
                     left: 0,
@@ -303,6 +314,23 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Widget _buildBody(bool spread) {
     if (_error != null) return _Notice('Could not open this book.\n$_error');
     final file = _file;
+    if (_isPdf && _ready) {
+      return SafeArea(
+        child: PdfBookView(
+          file: file,
+          streamUrl: _streamUrl,
+          controller: _pdf,
+          initialPage: _initialPdfPage,
+          spread: spread,
+          onToggleControls: _toggleControls,
+          bookId: book.driveFileId,
+          ink: services.ink,
+          inkController: _ink,
+          onPageChanged: (page, count) =>
+              _save('page:$page', count <= 1 ? 1 : (page - 1) / (count - 1)),
+        ),
+      );
+    }
     if (file == null) {
       return Center(
         child: Column(
@@ -316,25 +344,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
             Text(
               book.format.needsConversion
                   ? 'Converting with Google Drive'
-                  : 'Downloading from Google Drive',
+                  : 'Opening from Google Drive',
             ),
           ],
-        ),
-      );
-    }
-    if (_isPdf) {
-      return SafeArea(
-        child: PdfBookView(
-          file: file,
-          controller: _pdf,
-          initialPage: _initialPdfPage,
-          spread: spread,
-          onToggleControls: _toggleControls,
-          bookId: book.driveFileId,
-          ink: services.ink,
-          inkController: _ink,
-          onPageChanged: (page, count) =>
-              _save('page:$page', count <= 1 ? 1 : (page - 1) / (count - 1)),
         ),
       );
     }
@@ -403,7 +415,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
               ),
-              if (_file != null) ...[
+              if (_ready) ...[
+                _DownloadButton(book: book, cache: services.cache),
                 IconButton(
                   tooltip: _readAloud.active
                       ? 'Stop reading aloud'
@@ -796,4 +809,60 @@ class _Notice extends StatelessWidget {
       child: Text(text, textAlign: TextAlign.center),
     ),
   );
+}
+
+/// Keeps the book on the device for offline reading, or frees the space.
+class _DownloadButton extends StatelessWidget {
+  const _DownloadButton({required this.book, required this.cache});
+
+  final Book book;
+  final BookCache cache;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: cache,
+      builder: (context, _) {
+        if (cache.isDownloading(book)) {
+          return Padding(
+            padding: const EdgeInsets.all(12),
+            child: SizedBox.square(
+              dimension: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                value: cache.downloadProgress(book),
+              ),
+            ),
+          );
+        }
+        final kept = cache.isDownloaded(book);
+        return IconButton(
+          tooltip: kept ? 'Remove download' : 'Download for offline reading',
+          icon: Icon(
+            kept ? Icons.download_done : Icons.download_for_offline_outlined,
+          ),
+          onPressed: () async {
+            final messenger = ScaffoldMessenger.of(context);
+            try {
+              if (kept) {
+                await cache.removeDownload(book);
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Download removed')),
+                );
+              } else {
+                await cache.download(book);
+                messenger.showSnackBar(
+                  const SnackBar(content: Text('Available offline')),
+                );
+              }
+            } catch (e) {
+              messenger.showSnackBar(
+                SnackBar(content: Text('Download failed: $e')),
+              );
+            }
+          },
+        );
+      },
+    );
+  }
 }
