@@ -128,7 +128,7 @@ class WebBookView extends StatefulWidget {
   final void Function(({String cfi, String text})? selection) onSelection;
   final void Function(String cfi) onHighlightTapped;
   final void Function(String cfi, double fraction, String chapter) onRelocate;
-  final void Function(String title, List<TocItem> toc) onOpened;
+  final void Function(String title, String author, List<TocItem> toc) onOpened;
   final void Function(String message) onError;
   final VoidCallback onToggleControls;
 
@@ -190,7 +190,7 @@ class _WebBookViewState extends State<WebBookView> {
       handlerName: 'opened',
       callback: (args) {
         final d = args.first as Map;
-        widget.onOpened('${d['title']}', [
+        widget.onOpened('${d['title'] ?? ''}', '${d['author'] ?? ''}', [
           for (final item in (d['toc'] as List? ?? const []))
             if (item is Map)
               TocItem(

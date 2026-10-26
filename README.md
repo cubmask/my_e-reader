@@ -11,6 +11,10 @@ The full architecture and roadmap are in the
 
 Phase 4 starts with office documents. DOC, DOCX, RTF and ODT files are converted by Google Drive on first open: the app makes a temporary Google Docs copy, exports it as EPUB, deletes the copy and caches the EPUB. Everything else (highlights, read aloud, spreads) then works as for any EPUB. This needs the extra `drive.file` permission, so Google asks for consent once more after updating. Very large documents (over Drive's 10 MB export limit) can't be converted.
 
+The library now shows real titles and authors. Opening a book fills them in from its own metadata, and a long press (or right click) on a card edits the title, author and collections. Collections appear as chips above the format filters; long-press one to rename or delete it. These details sync through a hidden `library.json` in Drive's app data folder.
+
+PDFs take handwritten notes. Tap the pen button in a PDF's top bar, then write with the S Pen (or Apple Pencil, or the mouse on desktop) while fingers still scroll and zoom. The toolbar has a pen in four colours, a highlighter, an eraser and undo; the S Pen's side button and a Surface pen's eraser end also erase. Strokes are stored per page in page coordinates, so they stay in place at any zoom and in two-page spreads, and sync through a hidden `ink.json`. They are not written into the PDF file in Drive.
+
 Phase 3 added notes and read-aloud:
 
 - Select text to highlight it in yellow, green, blue or pink, with an optional note. Tap a highlight to recolour, edit or delete it.

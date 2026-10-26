@@ -84,6 +84,14 @@ const titleOf = metadata => {
     return typeof t === 'string' ? t : Object.values(t ?? {})[0] ?? ''
 }
 
+const authorOf = metadata => {
+    const names = [metadata?.author ?? []].flat()
+        .map(a => typeof a === 'string' ? a : a?.name)
+        .map(n => typeof n === 'string' ? n : Object.values(n ?? {})[0])
+        .filter(Boolean)
+    return names.join(', ')
+}
+
 // Left/right thirds turn pages, the middle toggles the app's controls.
 const handleTap = e => {
     if (e.target.closest?.('a[href]')) return
@@ -179,7 +187,8 @@ window.reader = {
             }))
             await view.init({ lastLocation: lastLocation || null, showTextStart: !lastLocation })
             send('opened', {
-                title: titleOf(view.book.metadata) || name,
+                title: titleOf(view.book.metadata),
+                author: authorOf(view.book.metadata),
                 toc: flattenToc(view.book.toc),
                 fixedLayout: !!view.isFixedLayout,
             })

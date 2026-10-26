@@ -70,6 +70,7 @@ class LibraryController extends ChangeNotifier {
   Future<void> signOut() async {
     await _auth.signOut();
     await _services?.progress.flush();
+    await _services?.meta.flush();
     _client = null;
     _services = null;
     _books = const [];
@@ -96,6 +97,7 @@ class LibraryController extends ChangeNotifier {
     _set(LibraryStatus.loading);
     try {
       await _services?.progress.sync();
+      await _services?.meta.sync();
       _books = await _sourceFactory(client, folderId).listBooks();
       _set(LibraryStatus.ready);
     } catch (e) {
