@@ -30,7 +30,7 @@ class _HomeShellState extends State<HomeShell> {
     final width = MediaQuery.sizeOf(context).width;
     final page = switch (_index) {
       0 => LibraryScreen(controller: widget.controller),
-      1 => const NotesScreen(),
+      1 => NotesScreen(controller: widget.controller),
       _ => SettingsScreen(controller: widget.controller),
     };
 

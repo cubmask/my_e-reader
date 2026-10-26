@@ -4,12 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 import 'pdf_spread.dart';
+import 'read_aloud.dart';
 
 /// Native PDF viewer (PDFium). Locations are page numbers.
 class PdfBookView extends StatefulWidget {
   const PdfBookView({
     super.key,
     required this.file,
+    required this.controller,
     required this.initialPage,
     required this.spread,
     required this.onPageChanged,
@@ -17,6 +19,7 @@ class PdfBookView extends StatefulWidget {
   });
 
   final File file;
+  final PdfViewerController controller;
   final int initialPage;
   final bool spread;
   final void Function(int page, int pageCount) onPageChanged;
@@ -27,7 +30,7 @@ class PdfBookView extends StatefulWidget {
 }
 
 class _PdfBookViewState extends State<PdfBookView> {
-  final _controller = PdfViewerController();
+  PdfViewerController get _controller => widget.controller;
 
   @override
   void didUpdateWidget(PdfBookView old) {
@@ -69,4 +72,33 @@ class _PdfBookViewState extends State<PdfBookView> {
       ),
     );
   }
+}
+
+/// Reads a PDF aloud page by page, turning pages as it goes.
+class PdfSpeechSource implements SpeechSource {
+  PdfSpeechSource(this._controller);
+
+  final PdfViewerController _controller;
+  int _page = 1;
+
+  Future<List<SpeechSegment>?> _read(int page) async {
+    if (!_controller.isReady || page > _controller.pageCount) return null;
+    _page = page;
+    await _controller.goToPage(pageNumber: page);
+    final text = await _controller.document.pages[page - 1]
+        .loadStructuredText();
+    return sentencesOf(text.fullText);
+  }
+
+  @override
+  Future<List<SpeechSegment>?> start() => _read(_controller.pageNumber ?? 1);
+
+  @override
+  Future<List<SpeechSegment>?> next() => _read(_page + 1);
+
+  @override
+  void onSegment(SpeechSegment segment) {}
+
+  @override
+  void stop() {}
 }

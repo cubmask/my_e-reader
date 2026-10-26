@@ -2,6 +2,7 @@
 // functions; this script reports back through flutter_inappwebview handlers.
 import './foliate/view.js'
 import { makeExtraBook } from './formats.js'
+import { Overlayer } from './foliate/overlayer.js'
 
 const send = (name, data) =>
     window.flutter_inappwebview?.callHandler(name, data)
@@ -13,6 +14,14 @@ const themes = {
 }
 
 let view = null
+
+// Highlights, keyed by CFI. Re-drawn whenever a section's overlay is created.
+const highlightColors = {
+    yellow: '#f9d71c', green: '#5fd068', blue: '#4aa8ff', pink: '#ff6fae',
+}
+const annotations = new Map()
+let speaking = false
+let selectionTimer
 let style = { theme: 'light', fontSize: 100, lineHeight: 1.5 }
 
 const css = () => {
@@ -92,8 +101,52 @@ const handleTap = e => {
     else send('toggleControls')
 }
 
+// Reports a finished text selection (or its clearing) to the app, which
+// shows the highlight and note actions.
+const onSelection = (doc, index) => {
+    clearTimeout(selectionTimer)
+    selectionTimer = setTimeout(() => {
+        if (speaking) return
+        const sel = doc.getSelection()
+        const text = sel?.toString().trim()
+        if (!sel || sel.rangeCount === 0 || !text) return send('selection', null)
+        const range = sel.getRangeAt(0)
+        send('selection', { cfi: view.getCFI(index, range), text })
+    }, 500)
+}
+
+const SSML_NS = 'http://www.w3.org/2001/10/synthesis'
+
+// Splits foliate's SSML into [{ mark, text }] so the app can speak each
+// sentence and ask us to highlight it.
+const toSegments = ssml => {
+    if (!ssml) return null
+    const doc = new DOMParser().parseFromString(ssml, 'application/xml')
+    const segments = []
+    let current = { mark: null, text: '' }
+    const walk = node => {
+        for (const child of node.childNodes) {
+            if (child.nodeType === Node.TEXT_NODE) current.text += child.textContent
+            else if (child.localName === 'mark' && child.namespaceURI === SSML_NS) {
+                if (current.text.trim()) segments.push(current)
+                current = { mark: child.getAttribute('name'), text: '' }
+            } else walk(child)
+        }
+    }
+    walk(doc.documentElement)
+    if (current.text.trim()) segments.push(current)
+    for (const seg of segments) seg.text = seg.text.replace(/\s+/g, ' ').trim()
+    return segments
+}
+
+const highlightSpoken = range => {
+    view.renderer.scrollToAnchor(range, true)
+}
+
+const initTTS = () => view.initTTS('sentence', highlightSpoken)
+
 window.reader = {
-    async open({ url, name, format, lastLocation, columns, theme, fontSize }) {
+    async open({ url, name, lastLocation, columns, theme, fontSize, annotations: annotations_ }) {
         try {
             style = { ...style, theme: theme ?? style.theme, fontSize: fontSize ?? style.fontSize }
             document.documentElement.style.setProperty('--bg', themes[style.theme].bg)
@@ -106,10 +159,19 @@ window.reader = {
             view.renderer.setAttribute('margin', '48px')
             view.renderer.setAttribute('gap', '6%')
             view.renderer.setStyles?.(css())
-            view.addEventListener('load', ({ detail: { doc } }) => {
+            view.addEventListener('load', ({ detail: { doc, index } }) => {
                 doc.addEventListener('click', handleTap)
                 doc.addEventListener('keydown', handleKey)
+                doc.addEventListener('selectionchange', () => onSelection(doc, index))
             })
+            view.addEventListener('create-overlay', () => {
+                for (const [cfi, color] of annotations) view.addAnnotation({ value: cfi, color })
+            })
+            view.addEventListener('draw-annotation', ({ detail: { draw, annotation } }) =>
+                draw(Overlayer.highlight, { color: highlightColors[annotation.color] ?? annotation.color }))
+            view.addEventListener('show-annotation', ({ detail: { value } }) =>
+                send('annotationTapped', { cfi: value }))
+            for (const a of annotations_ ?? []) annotations.set(a.cfi, a.color)
             view.addEventListener('relocate', ({ detail }) => detail.fraction != null && send('relocate', {
                 cfi: detail.cfi ?? '',
                 fraction: detail.fraction ?? 0,
@@ -129,6 +191,40 @@ window.reader = {
     prev: () => view?.goLeft(),
     goTo: target => view?.goTo(target),
     goToFraction: f => view?.goToFraction(f),
+    addAnnotation({ cfi, color }) {
+        annotations.set(cfi, color)
+        view?.addAnnotation({ value: cfi, color })
+        view?.renderer.getContents().forEach(({ doc }) => doc.getSelection()?.removeAllRanges())
+    },
+    removeAnnotation(cfi) {
+        annotations.delete(cfi)
+        view?.deleteAnnotation({ value: cfi })
+    },
+    clearSelection: () => view?.renderer.getContents().forEach(({ doc }) => doc.getSelection()?.removeAllRanges()),
+    // Text-to-speech: each call returns the next block as [{ mark, text }],
+    // or null at the end of the book.
+    async ttsStart() {
+        speaking = true
+        await initTTS()
+        const range = view.lastLocation?.range
+        return toSegments(range ? view.tts.from(range) : view.tts.start())
+    },
+    async ttsNext() {
+        let ssml = view.tts?.next()
+        while (!ssml) {
+            const before = view.renderer.getContents()[0]?.index
+            await view.renderer.nextSection()
+            if (view.renderer.getContents()[0]?.index === before) return null
+            await initTTS()
+            ssml = view.tts.start()
+        }
+        return toSegments(ssml)
+    },
+    ttsMark: mark => view?.tts?.setMark(mark),
+    ttsStop() {
+        speaking = false
+        view?.renderer.getContents().forEach(({ doc }) => doc.getSelection()?.removeAllRanges())
+    },
     setColumns: n => view?.renderer.setAttribute('max-column-count', String(n)),
     setStyle(next) {
         style = { ...style, ...next }

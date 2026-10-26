@@ -141,12 +141,12 @@ class ProgressStore {
   }
 }
 
-/// `progress.json` in the Drive appDataFolder, invisible in the user's Drive.
+/// A JSON file in the Drive appDataFolder, invisible in the user's Drive.
 class DriveAppDataRemote implements ProgressRemote {
-  DriveAppDataRemote(this._api);
+  DriveAppDataRemote(this._api, this._name);
 
-  static const _name = 'progress.json';
   final drive.DriveApi _api;
+  final String _name;
   String? _fileId;
 
   Future<String?> _findId() async {
