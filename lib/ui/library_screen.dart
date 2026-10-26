@@ -4,9 +4,10 @@ import '../core/book_format.dart';
 import '../library/book.dart';
 import '../library/book_meta_store.dart';
 import '../library/library_controller.dart';
-import '../reader/book_cache.dart';
-import '../reader/reader_screen.dart';
 import '../reader/reader_services.dart';
+import 'book_cover.dart';
+import 'book_sheet.dart';
+import 'breakpoints.dart';
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key, required this.controller});
@@ -22,6 +23,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   BookFormat? _format;
   String? _collection;
   bool _downloadedOnly = false;
+  _Sort _sort = _Sort.recent;
 
   @override
   Widget build(BuildContext context) {
@@ -51,7 +53,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ),
           ),
           LibraryStatus.ready => ListenableBuilder(
-            listenable: Listenable.merge([c.services?.meta, c.services?.cache]),
+            listenable: Listenable.merge([
+              c.services?.meta,
+              c.services?.cache,
+              c.services?.covers,
+            ]),
             builder: (context, _) => _buildLibrary(context, c.books),
           ),
         };
@@ -81,125 +87,153 @@ class _LibraryScreenState extends State<LibraryScreen> {
         )
         .where(matches)
         .toList();
-    if (meta != null) {
-      shown.sort(
-        (a, b) => meta
-            .titleOf(a)
-            .toLowerCase()
-            .compareTo(meta.titleOf(b).toLowerCase()),
-      );
-    }
+    String title(Book b) => (meta?.titleOf(b) ?? b.displayTitle).toLowerCase();
+    String author(Book b) => (meta?.authorOf(b) ?? '').toLowerCase();
+    DateTime opened(Book b) =>
+        widget.controller.services?.progress[b.driveFileId]?.updatedAt ??
+        DateTime(0);
+    shown.sort(switch (_sort) {
+      _Sort.recent => (a, b) {
+        final byDate = opened(b).compareTo(opened(a));
+        return byDate != 0 ? byDate : title(a).compareTo(title(b));
+      },
+      _Sort.title => (a, b) => title(a).compareTo(title(b)),
+      _Sort.author => (a, b) {
+        // Books without an author go last.
+        final x = author(a), y = author(b);
+        if (x.isEmpty != y.isEmpty) return x.isEmpty ? 1 : -1;
+        final byAuthor = x.compareTo(y);
+        return byAuthor != 0 ? byAuthor : title(a).compareTo(title(b));
+      },
+      _Sort.added => (a, b) => (b.modifiedTime ?? DateTime(0)).compareTo(
+        a.modifiedTime ?? DateTime(0),
+      ),
+    });
 
+    final services = widget.controller.services;
+    final theme = Theme.of(context);
+    final wide = MediaQuery.sizeOf(context).width >= Breakpoints.medium;
+    final pad = wide ? 32.0 : 16.0;
     return RefreshIndicator(
       onRefresh: widget.controller.refresh,
       child: CustomScrollView(
         slivers: [
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+            padding: EdgeInsets.fromLTRB(pad, wide ? 32 : 16, pad, 12),
             sliver: SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text('Library', style: largeTitle(context)),
+                      ),
+                      PopupMenuButton<_Sort>(
+                        tooltip: 'Sort',
+                        icon: const Icon(Icons.sort),
+                        initialValue: _sort,
+                        onSelected: (v) => setState(() => _sort = v),
+                        itemBuilder: (_) => [
+                          for (final v in _Sort.values)
+                            CheckedPopupMenuItem(
+                              value: v,
+                              checked: v == _sort,
+                              child: Text(v.label),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  SearchBar(
+                    hintText: 'Search titles and authors',
+                    leading: const Icon(Icons.search),
+                    elevation: const WidgetStatePropertyAll(0),
+                    backgroundColor: WidgetStatePropertyAll(
+                      theme.colorScheme.surfaceContainerHigh,
+                    ),
+                    onChanged: (v) => setState(() => _query = v),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: EdgeInsets.symmetric(horizontal: pad),
               child: Row(
                 children: [
-                  Text(
-                    'Library',
-                    style: Theme.of(context).textTheme.headlineMedium,
-                  ),
-                  const SizedBox(width: 16),
-                  Text(
-                    '${books.length} books',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  const Spacer(),
-                  SizedBox(
-                    width: 280,
-                    child: SearchBar(
-                      hintText: 'Search titles and authors',
-                      leading: const Icon(Icons.search),
-                      onChanged: (v) => setState(() => _query = v),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          if (collections.isNotEmpty && meta != null)
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
-              sliver: SliverToBoxAdapter(
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
+                  for (final chip in <Widget>[
                     ChoiceChip(
-                      avatar: const Icon(Icons.collections_bookmark_outlined),
-                      label: const Text('All books'),
-                      selected: _collection == null,
-                      onSelected: (_) => setState(() => _collection = null),
+                      label: Text('All · ${books.length}'),
+                      selected:
+                          _format == null &&
+                          _collection == null &&
+                          !_downloadedOnly,
+                      onSelected: (_) => setState(() {
+                        _format = null;
+                        _collection = null;
+                        _downloadedOnly = false;
+                      }),
                     ),
-                    for (final name in collections)
-                      GestureDetector(
-                        onLongPress: () => _manageCollection(meta, name),
-                        onSecondaryTap: () => _manageCollection(meta, name),
-                        child: ChoiceChip(
-                          label: Text(name),
-                          selected: _collection == name,
-                          onSelected: (_) => setState(() => _collection = name),
+                    FilterChip(
+                      avatar: const Icon(Icons.download_done),
+                      label: const Text('Downloaded'),
+                      selected: _downloadedOnly,
+                      onSelected: (on) => setState(() => _downloadedOnly = on),
+                    ),
+                    if (meta != null)
+                      for (final name in collections)
+                        GestureDetector(
+                          onLongPress: () => _manageCollection(meta, name),
+                          onSecondaryTap: () => _manageCollection(meta, name),
+                          child: ChoiceChip(
+                            avatar: const Icon(
+                              Icons.collections_bookmark_outlined,
+                            ),
+                            label: Text(name),
+                            selected: _collection == name,
+                            onSelected: (on) =>
+                                setState(() => _collection = on ? name : null),
+                          ),
                         ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            sliver: SliverToBoxAdapter(
-              child: Wrap(
-                spacing: 8,
-                children: [
-                  FilterChip(
-                    avatar: const Icon(Icons.download_done),
-                    label: const Text('Downloaded'),
-                    selected: _downloadedOnly,
-                    onSelected: (on) => setState(() => _downloadedOnly = on),
-                  ),
-                  ChoiceChip(
-                    label: const Text('All'),
-                    selected: _format == null,
-                    onSelected: (_) => setState(() => _format = null),
-                  ),
-                  for (final f in present)
-                    ChoiceChip(
-                      label: Text(f.label),
-                      selected: _format == f,
-                      onSelected: (_) => setState(() => _format = f),
+                    if (present.length > 1)
+                      for (final f in present)
+                        ChoiceChip(
+                          label: Text(f.label),
+                          selected: _format == f,
+                          onSelected: (on) =>
+                              setState(() => _format = on ? f : null),
+                        ),
+                  ])
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: chip,
                     ),
                 ],
               ),
             ),
           ),
+          if (shown.isEmpty)
+            const SliverFillRemaining(
+              hasScrollBody: false,
+              child: Center(child: Text('No books match.')),
+            ),
           SliverPadding(
-            padding: const EdgeInsets.all(24),
+            padding: EdgeInsets.fromLTRB(pad, 24, pad, 32),
             sliver: SliverGrid.builder(
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 180,
-                childAspectRatio: 0.62,
-                crossAxisSpacing: 20,
-                mainAxisSpacing: 24,
+              gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: wide ? 190 : 150,
+                // Cover plus one status row.
+                childAspectRatio: 0.56,
+                crossAxisSpacing: wide ? 28 : 16,
+                mainAxisSpacing: wide ? 32 : 24,
               ),
               itemCount: shown.length,
-              itemBuilder: (context, i) => _BookCard(
-                book: shown[i],
-                services: widget.controller.services,
-                onEdit: meta == null
-                    ? null
-                    : () => showDialog<void>(
-                        context: context,
-                        builder: (_) => BookDetailsDialog(
-                          book: shown[i],
-                          meta: meta,
-                          cache: cache,
-                        ),
-                      ),
-              ),
+              itemBuilder: (context, i) =>
+                  LibraryBookTile(book: shown[i], services: services),
             ),
           ),
         ],
@@ -244,93 +278,124 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 }
 
-class _BookCard extends StatelessWidget {
-  const _BookCard({required this.book, required this.services, this.onEdit});
+enum _Sort {
+  recent('Recently read'),
+  title('Title'),
+  author('Author'),
+  added('Recently added');
+
+  const _Sort(this.label);
+  final String label;
+}
+
+/// The big bold page title used across the app, as in Apple Books.
+TextStyle? largeTitle(BuildContext context) =>
+    Theme.of(context).textTheme.headlineLarge
+        ?.copyWith(fontWeight: FontWeight.w800);
+
+/// A cover in the library grid, with its progress and a "more" button.
+/// Tap to read; long-press or "more" for the book's details.
+class LibraryBookTile extends StatelessWidget {
+  const LibraryBookTile({
+    super.key,
+    required this.book,
+    required this.services,
+  });
 
   final Book book;
   final ReaderServices? services;
-  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final meta = services?.meta;
-    final author = meta?.authorOf(book) ?? '';
-    return InkWell(
-      borderRadius: BorderRadius.circular(8),
-      onLongPress: onEdit,
-      onSecondaryTap: onEdit,
-      onTap: services == null
-          ? null
-          : () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => ReaderScreen(book: book, services: services!),
+    final theme = Theme.of(context);
+    final services = this.services;
+    final cache = services?.cache;
+    final label = progressLabel(book, services);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: GestureDetector(
+              onTap: services == null
+                  ? null
+                  : () => openBook(context, book, services),
+              onLongPress: services == null
+                  ? null
+                  : () => showBookSheet(context, book, services),
+              onSecondaryTap: services == null
+                  ? null
+                  : () => showBookSheet(context, book, services),
+              child: Semantics(
+                button: true,
+                label: services?.meta.titleOf(book) ?? book.displayTitle,
+                child: BookCover(book: book, services: services),
               ),
             ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Container(
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              alignment: Alignment.bottomLeft,
-              padding: const EdgeInsets.all(8),
-              child: Row(
-                children: [
-                  Chip(
-                    label: Text(book.format.label),
-                    visualDensity: VisualDensity.compact,
+          ),
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: 32,
+          child: Row(
+            children: [
+              if (label == 'New')
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
                   ),
-                  const Spacer(),
-                  if (services?.cache case final cache?)
-                    if (cache.isDownloading(book))
-                      SizedBox.square(
-                        dimension: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          value: cache.downloadProgress(book),
-                        ),
-                      )
-                    else if (cache.isDownloaded(book))
-                      Tooltip(
-                        message: 'Available offline',
-                        child: Icon(
-                          Icons.download_done,
-                          size: 20,
-                          color: scheme.primary,
-                        ),
-                      ),
-                ],
-              ),
-            ),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primary,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    'NEW',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onPrimary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                )
+              else
+                Text(
+                  label,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              const SizedBox(width: 6),
+              if (cache != null && cache.isDownloading(book))
+                SizedBox.square(
+                  dimension: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    value: cache.downloadProgress(book),
+                  ),
+                )
+              else if (cache?.isDownloaded(book) ?? false)
+                Tooltip(
+                  message: 'Available offline',
+                  child: Icon(
+                    Icons.download_done,
+                    size: 16,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+              const Spacer(),
+              if (services != null)
+                IconButton(
+                  tooltip: 'More',
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 20,
+                  icon: const Icon(Icons.more_horiz),
+                  onPressed: () => showBookSheet(context, book, services),
+                ),
+            ],
           ),
-          const SizedBox(height: 8),
-          Text(
-            meta?.titleOf(book) ?? book.displayTitle,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
-          if (author.isNotEmpty)
-            Text(
-              author,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall,
-            )
-          else if (book.folderPath.isNotEmpty)
-            Text(
-              book.folderPath,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -338,16 +403,10 @@ class _BookCard extends StatelessWidget {
 /// Edits a book's title, author and collections. Opened by a long press (or
 /// right click) on its card.
 class BookDetailsDialog extends StatefulWidget {
-  const BookDetailsDialog({
-    super.key,
-    required this.book,
-    required this.meta,
-    this.cache,
-  });
+  const BookDetailsDialog({super.key, required this.book, required this.meta});
 
   final Book book;
   final BookMetaStore meta;
-  final BookCache? cache;
 
   @override
   State<BookDetailsDialog> createState() => _BookDetailsDialogState();
@@ -458,26 +517,6 @@ class _BookDetailsDialogState extends State<BookDetailsDialog> {
         ),
       ),
       actions: [
-        if (widget.cache case final cache?)
-          if (cache.isDownloaded(widget.book))
-            TextButton.icon(
-              icon: const Icon(Icons.delete_outline),
-              label: const Text('Remove download'),
-              onPressed: () {
-                cache.removeDownload(widget.book);
-                Navigator.pop(context);
-              },
-            )
-          else
-            TextButton.icon(
-              icon: const Icon(Icons.download_for_offline_outlined),
-              label: const Text('Download'),
-              onPressed: () {
-                // Progress shows on the book's card.
-                cache.download(widget.book).catchError((_) {});
-                Navigator.pop(context);
-              },
-            ),
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),

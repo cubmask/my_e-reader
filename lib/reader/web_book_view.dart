@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -112,6 +114,7 @@ class WebBookView extends StatefulWidget {
     required this.onOpened,
     required this.onError,
     required this.onToggleControls,
+    this.onCover,
   });
 
   final File file;
@@ -131,6 +134,9 @@ class WebBookView extends StatefulWidget {
   final void Function(String title, String author, List<TocItem> toc) onOpened;
   final void Function(String message) onError;
   final VoidCallback onToggleControls;
+
+  /// The book's cover as JPEG bytes, sent once it has opened.
+  final void Function(Uint8List jpeg)? onCover;
 
   @override
   State<WebBookView> createState() => _WebBookViewState();
@@ -219,6 +225,13 @@ class _WebBookViewState extends State<WebBookView> {
       callback: (args) {
         final d = args.firstOrNull;
         if (d is Map) widget.onHighlightTapped('${d['cfi']}');
+      },
+    );
+    web.addJavaScriptHandler(
+      handlerName: 'cover',
+      callback: (args) {
+        final data = args.firstOrNull;
+        if (data is String) widget.onCover?.call(base64Decode(data));
       },
     );
     web.addJavaScriptHandler(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../library/library_controller.dart';
 import '../reader/book_cache.dart';
+import 'library_screen.dart' show largeTitle;
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key, required this.controller});
@@ -15,7 +16,7 @@ class SettingsScreen extends StatelessWidget {
       builder: (context, _) => ListView(
         padding: const EdgeInsets.all(24),
         children: [
-          Text('Settings', style: Theme.of(context).textTheme.headlineMedium),
+          Text('Settings', style: largeTitle(context)),
           const SizedBox(height: 16),
           ListTile(
             leading: const Icon(Icons.folder_outlined),

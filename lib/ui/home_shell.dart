@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../library/library_controller.dart';
 import 'breakpoints.dart';
+import 'home_screen.dart';
 import 'library_screen.dart';
 import 'notes_screen.dart';
 import 'settings_screen.dart';
@@ -20,6 +21,7 @@ class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
   static const _destinations = [
+    (Icons.home_outlined, Icons.home, 'Home'),
     (Icons.local_library_outlined, Icons.local_library, 'Library'),
     (Icons.sticky_note_2_outlined, Icons.sticky_note_2, 'Notes'),
     (Icons.settings_outlined, Icons.settings, 'Settings'),
@@ -29,8 +31,9 @@ class _HomeShellState extends State<HomeShell> {
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
     final page = switch (_index) {
-      0 => LibraryScreen(controller: widget.controller),
-      1 => NotesScreen(controller: widget.controller),
+      0 => HomeScreen(controller: widget.controller),
+      1 => LibraryScreen(controller: widget.controller),
+      2 => NotesScreen(controller: widget.controller),
       _ => SettingsScreen(controller: widget.controller),
     };
 
@@ -71,7 +74,6 @@ class _HomeShellState extends State<HomeShell> {
                   ),
               ],
             ),
-            const VerticalDivider(width: 1),
             Expanded(child: page),
           ],
         ),

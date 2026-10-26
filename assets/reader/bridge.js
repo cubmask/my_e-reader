@@ -92,6 +92,20 @@ const authorOf = metadata => {
     return names.join(', ')
 }
 
+// The book's own cover, scaled down to a JPEG for the library.
+const sendCover = async () => {
+    const blob = await view.book.getCover?.()
+    if (!blob) return
+    const bitmap = await createImageBitmap(blob)
+    const scale = Math.min(1, 900 / bitmap.height)
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale))
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale))
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+    const url = canvas.toDataURL('image/jpeg', 0.85)
+    send('cover', url.slice(url.indexOf(',') + 1))
+}
+
 // Left/right thirds turn pages, the middle toggles the app's controls.
 const handleTap = e => {
     if (e.target.closest?.('a[href]')) return
@@ -192,6 +206,7 @@ window.reader = {
                 toc: flattenToc(view.book.toc),
                 fixedLayout: !!view.isFixedLayout,
             })
+            sendCover().catch(() => {})
         } catch (e) {
             send('error', String(e?.message ?? e))
         }

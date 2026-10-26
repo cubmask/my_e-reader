@@ -9,6 +9,18 @@ The full architecture and roadmap are in the
 
 ## Status
 
+The interface follows Apple Books:
+
+- **Home** opens on a large *Continue reading* card for the book you read last. Below it are shelves of recent books, books on this device and books new in your library.
+- **Library** is a grid of covers with progress (or a NEW badge), a search bar, one row of filter chips (downloaded, collections, formats) and a sort menu (recently read, title, author, recently added).
+- **Covers:**
+  - Covers come from the book itself the first time it opens (EPUB, MOBI, FB2, comics, DjVu) or from Drive's preview image (PDFs).
+  - Other books get a typeset cover in a muted colour.
+- **Book sheet:** tapping a cover opens the book. Long-pressing it, or tapping its *More* button, opens a sheet with the cover, details, progress, *Read/Continue*, *Download* and editing.
+- **Reader and theme:**
+  - The reader's bars are frosted and tinted to the page, in light or dark to match the reading theme.
+  - The theme uses plain white or black backgrounds with an orange accent.
+
 Books now stream from Google Drive instead of being stored automatically. PDFs page in straight from Drive through HTTP range requests, relayed by the loopback server, so a large PDF opens without downloading all of it. Other formats need the whole file, so they go to a temporary streaming cache that is trimmed past 300 MB. To keep a book for offline reading, tap the download button in the reader or use *Download* in the book's details (long-press its card). Downloaded books show a tick on their card and are never evicted. A *Downloaded* filter lists them, and Settings shows the space used, with options to remove all downloads or clear the streaming cache. A downloaded book that changes in Drive is fetched again when the library refreshes.
 
 Phase 4 starts with office documents. DOC, DOCX, RTF and ODT files are converted by Google Drive on first open: the app makes a temporary Google Docs copy, exports it as EPUB, deletes the copy and caches the EPUB. Everything else (highlights, read aloud, spreads) then works as for any EPUB. This needs the extra `drive.file` permission, so Google asks for consent once more after updating. Very large documents (over Drive's 10 MB export limit) can't be converted.

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -381,7 +382,10 @@ class _ReaderScreenState extends State<ReaderScreen> {
           if (!book.format.needsConversion) {
             services.meta.fillIn(
               book.driveFileId,
-              title: title,
+              // Comics and DjVu have no metadata and report the file name.
+              title: title == book.fileName || title == book.displayTitle
+                  ? null
+                  : title,
               author: author,
             );
           }
@@ -392,15 +396,42 @@ class _ReaderScreenState extends State<ReaderScreen> {
         }),
         onError: (message) => setState(() => _error = message),
         onToggleControls: _toggleControls,
+        onCover: (jpeg) => services.covers.saveFromBook(book.driveFileId, jpeg),
+      ),
+    );
+  }
+
+  /// Frosted bars tinted like the page, as in Apple Books, in light or dark
+  /// to match the reading theme.
+  Widget _chrome(Widget child) {
+    final dark = services.settings.theme == ReaderTheme.dark;
+    final base = Theme.of(context);
+    final theme = dark == (base.brightness == Brightness.dark)
+        ? base
+        : ThemeData(
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: base.colorScheme.primary,
+              brightness: dark ? Brightness.dark : Brightness.light,
+            ),
+          );
+    return Theme(
+      data: theme,
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+          child: Material(
+            color: _background().withValues(alpha: 0.82),
+            child: child,
+          ),
+        ),
       ),
     );
   }
 
   Widget _buildTopBar() {
     final bookmarked = _bookmarkHere != null;
-    return Material(
-      elevation: 2,
-      child: SafeArea(
+    return _chrome(
+      SafeArea(
         bottom: false,
         child: SizedBox(
           height: 56,
@@ -508,9 +539,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   Widget _buildBottomBar() {
     final isWeb = !_isPdf;
-    return Material(
-      elevation: 2,
-      child: SafeArea(
+    return _chrome(
+      SafeArea(
         top: false,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
