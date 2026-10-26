@@ -84,6 +84,11 @@ const titleOf = metadata => {
     return typeof t === 'string' ? t : Object.values(t ?? {})[0] ?? ''
 }
 
+const languageOf = metadata => {
+    const lang = [metadata?.language ?? []].flat()[0]
+    return typeof lang === 'string' ? lang : ''
+}
+
 const authorOf = metadata => {
     const names = [metadata?.author ?? []].flat()
         .map(a => typeof a === 'string' ? a : a?.name)
@@ -203,6 +208,7 @@ window.reader = {
             send('opened', {
                 title: titleOf(view.book.metadata),
                 author: authorOf(view.book.metadata),
+                language: languageOf(view.book.metadata),
                 toc: flattenToc(view.book.toc),
                 fixedLayout: !!view.isFixedLayout,
             })

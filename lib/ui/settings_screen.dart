@@ -5,6 +5,7 @@ import '../library/metadata_updater.dart';
 import '../reader/book_cache.dart';
 import 'duplicates_screen.dart';
 import 'library_screen.dart' show largeTitle;
+import 'voice_settings.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key, required this.controller});
@@ -42,6 +43,8 @@ class SettingsScreen extends StatelessWidget {
                 ),
               ),
             ),
+          if (controller.services?.voices case final voices?)
+            VoiceSettings(voices: voices),
           if (controller.services?.cache case final cache?)
             _StorageSection(cache: cache),
           if (controller.status != LibraryStatus.signedOut)

@@ -1,5 +1,6 @@
 package com.cubmask.ebook_reader
 
-import io.flutter.embedding.android.FlutterActivity
+import com.ryanheise.audioservice.AudioServiceActivity
 
-class MainActivity : FlutterActivity()
+// Shares its Flutter engine with the read-aloud media service.
+class MainActivity : AudioServiceActivity()

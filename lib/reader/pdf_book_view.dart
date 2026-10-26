@@ -115,6 +115,9 @@ class PdfSpeechSource implements SpeechSource {
   final PdfViewerController _controller;
   int _page = 1;
 
+  @override
+  String? get language => null;
+
   Future<List<SpeechSegment>?> _read(int page) async {
     if (!_controller.isReady || page > _controller.pageCount) return null;
     _page = page;

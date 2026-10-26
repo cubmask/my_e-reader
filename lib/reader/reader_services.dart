@@ -17,6 +17,7 @@ import 'book_cache.dart';
 import 'progress_store.dart';
 import 'reader_server.dart';
 import 'reader_settings.dart';
+import 'tts/voice_store.dart';
 
 /// Everything the reader needs once the user is signed in.
 class ReaderServices {
@@ -32,6 +33,7 @@ class ReaderServices {
     DuplicateAlerts? duplicates,
     required this.server,
     required this.settings,
+    this.voices,
   }) : duplicates = duplicates ?? DuplicateAlerts();
 
   final BookCache cache;
@@ -45,6 +47,9 @@ class ReaderServices {
   final DuplicateAlerts duplicates;
   final ReaderServer server;
   final ReaderSettings settings;
+
+  /// Offline voices for reading aloud; the system voices when null.
+  final VoiceStore? voices;
 
   static Future<ReaderServices> create(http.Client client) async {
     final api = drive.DriveApi(client);
@@ -90,6 +95,7 @@ class ReaderServices {
       newBooks: NewBooks(),
       server: ReaderServer(drive: client),
       settings: ReaderSettings(),
+      voices: VoiceStore(Directory(p.join(dir.path, 'voices'))),
     );
     await Future.wait([
       services.progress.load(),
@@ -102,6 +108,7 @@ class ReaderServices {
       services.newBooks.load(),
       services.duplicates.load(),
       services.settings.load(),
+      services.voices!.load(),
     ]);
     return services;
   }

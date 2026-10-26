@@ -10,11 +10,14 @@ import '../library/book.dart';
 import '../library/cover_store.dart' show CoverKind;
 import '../notes/annotation_store.dart';
 import '../ui/breakpoints.dart';
+import '../ui/voice_settings.dart';
 import 'book_cache.dart';
 import 'ink_layer.dart';
 import 'pdf_book_view.dart';
 import 'progress_store.dart';
 import 'read_aloud.dart';
+import 'tts/background_audio.dart';
+import 'tts/voice_pack.dart';
 import 'reader_services.dart';
 import 'reader_settings.dart';
 import 'web_book_view.dart';
@@ -48,7 +51,7 @@ class ReaderScreen extends StatefulWidget {
 class _ReaderScreenState extends State<ReaderScreen> {
   final _web = WebBookController();
   final _pdf = PdfViewerController();
-  final _readAloud = ReadAloud();
+  late final _readAloud = ReadAloud(voices: services.voices);
   final _ink = InkController();
   File? _file;
 
@@ -92,6 +95,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   @override
   void dispose() {
+    BackgroundAudio.instance.detach(_readAloud);
     _readAloud.dispose();
     _ink.dispose();
     services.ink.flush();
@@ -246,6 +250,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Future<void> _toggleReadAloud() async {
     if (_readAloud.active) return _readAloud.stop();
     setState(() => _controls = true);
+    await BackgroundAudio.instance.attach(_readAloud, title: _title);
     await _readAloud.play(
       _isPdf ? PdfSpeechSource(_pdf) : WebSpeechSource(_web),
     );
@@ -589,13 +594,52 @@ class _ReaderScreenState extends State<ReaderScreen> {
     );
   }
 
+  /// Which voice is reading, such as "German · Supertonic 3".
+  String _voiceLabel() {
+    final language = _readAloud.language;
+    if (language == null) return 'Reading aloud';
+    final voices = services.voices;
+    final neural = voices != null && voices.usesNeuralFor(language);
+    return '${languageName(language)} · '
+        '${neural ? voices.pack.name : 'System voice'}';
+  }
+
+  void _showVoiceSettings() {
+    final voices = services.voices;
+    if (voices == null) return;
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.only(bottom: 16),
+          child: VoiceSettings(voices: voices, preview: !_readAloud.active),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSpeedRow() {
     const speeds = [0.75, 1.0, 1.25, 1.5, 2.0];
     return Row(
       children: [
-        const Icon(Icons.record_voice_over, size: 20),
-        const SizedBox(width: 12),
-        const Text('Reading aloud'),
+        IconButton(
+          tooltip: _readAloud.paused ? 'Resume' : 'Pause',
+          icon: Icon(_readAloud.paused ? Icons.play_arrow : Icons.pause),
+          onPressed: _readAloud.paused ? _readAloud.resume : _readAloud.pause,
+        ),
+        Flexible(
+          child: TextButton.icon(
+            icon: const Icon(Icons.record_voice_over, size: 20),
+            label: Text(
+              _voiceLabel(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            onPressed: services.voices == null ? null : _showVoiceSettings,
+          ),
+        ),
         const Spacer(),
         SegmentedButton<double>(
           showSelectedIcon: false,
