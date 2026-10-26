@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../library/library_controller.dart';
 import '../library/metadata_updater.dart';
 import '../reader/book_cache.dart';
+import 'duplicates_screen.dart';
 import 'library_screen.dart' show largeTitle;
 
 class SettingsScreen extends StatelessWidget {
@@ -26,6 +27,21 @@ class SettingsScreen extends StatelessWidget {
           ),
           if (controller.services?.metadata case final metadata?)
             _MetadataSection(metadata: metadata, controller: controller),
+          if (controller.services != null)
+            ListTile(
+              leading: const Icon(Icons.file_copy_outlined),
+              title: const Text('Duplicate books'),
+              subtitle: Text(switch (duplicatesIn(controller).length) {
+                0 => 'None found',
+                1 => '1 book has more than one copy',
+                final n => '$n books have more than one copy',
+              }),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => DuplicatesScreen(controller: controller),
+                ),
+              ),
+            ),
           if (controller.services?.cache case final cache?)
             _StorageSection(cache: cache),
           if (controller.status != LibraryStatus.signedOut)

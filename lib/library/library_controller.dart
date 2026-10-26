@@ -57,6 +57,7 @@ class LibraryController extends ChangeNotifier {
     try {
       final client = _client = await _auth.signIn();
       _services = await _servicesFactory(client);
+      _services!.cache.addListener(_dropDeleted);
       final prefs = await SharedPreferences.getInstance();
       _folderId = prefs.getString(_folderKey);
       if (_folderId == null) {
@@ -73,6 +74,7 @@ class LibraryController extends ChangeNotifier {
     await _auth.signOut();
     await _services?.progress.flush();
     await _services?.meta.flush();
+    _services?.cache.removeListener(_dropDeleted);
     _client = null;
     _services = null;
     _books = const [];
@@ -100,7 +102,12 @@ class LibraryController extends ChangeNotifier {
     try {
       await _services?.progress.sync();
       await _services?.meta.sync();
-      _books = await _sourceFactory(client, folderId).listBooks();
+      final deleted = _services?.cache.deleted ?? const {};
+      // Drive's listing can lag behind a delete for a moment.
+      _books = [
+        for (final b in await _sourceFactory(client, folderId).listBooks())
+          if (!deleted.contains(b.driveFileId)) b,
+      ];
       _set(LibraryStatus.ready);
       // Fetch new versions of downloaded books in the background.
       unawaited(_services?.cache.refreshDownloads(_books));
@@ -109,6 +116,17 @@ class LibraryController extends ChangeNotifier {
     } catch (e) {
       _fail(e);
     }
+  }
+
+  /// Takes books deleted from Drive off the list without a refresh.
+  void _dropDeleted() {
+    final deleted = _services?.cache.deleted ?? const {};
+    if (!_books.any((b) => deleted.contains(b.driveFileId))) return;
+    _books = [
+      for (final b in _books)
+        if (!deleted.contains(b.driveFileId)) b,
+    ];
+    notifyListeners();
   }
 
   void _set(LibraryStatus status) {

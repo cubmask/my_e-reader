@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -40,6 +41,10 @@ class BookCache extends ChangeNotifier {
 
   /// Download progress (0 to 1, or null when the size is unknown) by Drive id.
   final _active = <String, double?>{};
+
+  /// Drive ids of books deleted from Drive in this session.
+  final _deleted = <String>{};
+  Set<String> get deleted => UnmodifiableSetView(_deleted);
 
   Future<void> load() async {
     // Earlier versions kept every opened book in the root; those copies are
@@ -138,6 +143,25 @@ class BookCache extends ChangeNotifier {
     _downloaded.remove(book.driveFileId);
     notifyListeners();
     await _removeOlderVersions(downloads, book);
+  }
+
+  /// Deletes [book] from Google Drive for good, skipping the Drive trash,
+  /// along with its copies on this device.
+  ///
+  /// Throws a [drive.DetailedApiRequestError] when Drive refuses, such as
+  /// for a file shared by someone else.
+  Future<void> deleteFromDrive(Book book) async {
+    try {
+      await _api.files.delete(book.driveFileId, supportsAllDrives: true);
+    } on drive.DetailedApiRequestError catch (e) {
+      // Already gone is as good as deleted.
+      if (e.status != 404) rethrow;
+    }
+    _deleted.add(book.driveFileId);
+    _downloaded.remove(book.driveFileId);
+    notifyListeners();
+    await _removeOlderVersions(downloads, book);
+    await _removeOlderVersions(_streams, book);
   }
 
   Future<void> removeAllDownloads() async {

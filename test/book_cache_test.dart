@@ -171,4 +171,45 @@ void main() {
       'DELETE /drive/v3/files/tmp',
     ]);
   });
+
+  test('deleteFromDrive deletes the file in Drive and on the device', () async {
+    final requests = <http.Request>[];
+    final api = drive.DriveApi(
+      MockClient((r) async {
+        requests.add(r);
+        return switch (r.url.pathSegments.last) {
+          'gone' => http.Response('{"error": {"code": 404}}', 404),
+          'shared' => http.Response(
+            '{"error": {"code": 403, "message": "no"}}',
+            403,
+          ),
+          _ => http.Response('', 204),
+        };
+      }),
+    );
+    final deleting = BookCache(api, dir);
+    final book = _book('a', 1);
+    final copy = File(
+      '${dir.path}/downloads/a_${book.modifiedTime!.millisecondsSinceEpoch}.epub',
+    );
+    await copy.create(recursive: true);
+    await deleting.load();
+    expect(deleting.isDownloaded(book), isTrue);
+
+    await deleting.deleteFromDrive(book);
+    expect(requests.single.method, 'DELETE');
+    expect(requests.single.url.path, endsWith('/files/a'));
+    expect(deleting.deleted, contains('a'));
+    expect(deleting.isDownloaded(book), isFalse);
+    expect(await copy.exists(), isFalse);
+
+    // Already gone counts as deleted; someone else's file does not.
+    await deleting.deleteFromDrive(_book('gone', 1));
+    expect(deleting.deleted, contains('gone'));
+    await expectLater(
+      deleting.deleteFromDrive(_book('shared', 1)),
+      throwsA(isA<drive.DetailedApiRequestError>()),
+    );
+    expect(deleting.deleted, isNot(contains('shared')));
+  });
 }

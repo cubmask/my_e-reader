@@ -8,6 +8,7 @@ import '../reader/reader_services.dart';
 import 'book_cover.dart';
 import 'book_sheet.dart';
 import 'breakpoints.dart';
+import 'duplicates_screen.dart';
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key, required this.controller});
@@ -111,6 +112,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     });
 
     final services = widget.controller.services;
+    final duplicates = duplicatesIn(widget.controller).length;
     final theme = Theme.of(context);
     final wide = MediaQuery.sizeOf(context).width >= Breakpoints.medium;
     final pad = wide ? 32.0 : 16.0;
@@ -184,6 +186,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       selected: _downloadedOnly,
                       onSelected: (on) => setState(() => _downloadedOnly = on),
                     ),
+                    if (duplicates > 0)
+                      ActionChip(
+                        avatar: const Icon(Icons.file_copy_outlined),
+                        label: Text('Duplicates · $duplicates'),
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) =>
+                                DuplicatesScreen(controller: widget.controller),
+                          ),
+                        ),
+                      ),
                     if (meta != null)
                       for (final name in collections)
                         GestureDetector(

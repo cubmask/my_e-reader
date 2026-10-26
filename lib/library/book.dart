@@ -11,6 +11,7 @@ class Book {
     this.modifiedTime,
     this.thumbnailLink,
     this.createdTime,
+    this.md5,
   });
 
   final String driveFileId;
@@ -28,6 +29,9 @@ class Book {
 
   /// When the file arrived in Drive (uploaded or copied there).
   final DateTime? createdTime;
+
+  /// Drive's checksum of the file's contents; equal for identical copies.
+  final String? md5;
 
   /// File name without its extension, used until real metadata is read.
   String get displayTitle {
