@@ -41,6 +41,7 @@ Phase 3 added notes and read-aloud:
 - The Notes tab lists every highlight across the library, with search and a copy-as-Markdown export. Tap one to jump back into the book.
 - Highlights and notes sync through a hidden `annotations.json` in Drive's app data folder, like reading progress.
 - Read aloud uses the system voices (Samsung or Google on Android). It highlights each sentence as it's spoken, turns pages and chapters by itself, and runs at 0.75x to 2x speed. PDFs are read page by page.
+- Offline neural voice: Settings > Read aloud downloads [Supertonic 3](https://huggingface.co/Supertone/supertonic-3) (128 MB, run with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)), ten natural voices for 31 languages that work without a connection. The reading language follows the book's metadata and the script of its text, or can be fixed in settings. Languages it doesn't speak (such as Chinese), or everything when it isn't downloaded, fall back to the system voices. Reading carries on with the screen locked, with pause and stop on the lock screen. To keep the APK small, build release copies with `flutter build apk --split-per-abi` and install the `arm64-v8a` one.
 
 Phase 2 added DjVu (rendered with DjVu.js), CBR and RAR (UnRAR compiled to WebAssembly, run in a worker), and ZIP. An archive that holds one book opens as that book; one full of page images opens as a comic.
 

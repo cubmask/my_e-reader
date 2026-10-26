@@ -45,6 +45,10 @@ dependencies:
   pdfrx: ^2.10.1
   path_provider: ^2.1.6
   flutter_tts: ^4.2.5
+  sherpa_onnx: ^2.0.1
+  audio_service: ^0.18.19
+  audioplayers: ^6.8.1
+  archive: ^4.5.2
 
 dev_dependencies:
   flutter_test:

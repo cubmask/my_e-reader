@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
-import 'package:flutter_tts/flutter_tts.dart';
+
+import 'tts/speech_engine.dart';
+import 'tts/voice_pack.dart';
 
 /// One sentence to speak; [mark] lets the source highlight it.
 class SpeechSegment {
@@ -11,6 +15,9 @@ class SpeechSegment {
 
 /// Supplies text to read aloud, one block (paragraph or page) at a time.
 abstract interface class SpeechSource {
+  /// The book's declared language, such as 'en-GB', when it has one.
+  String? get language;
+
   /// The block at the current reading position.
   Future<List<SpeechSegment>?> start();
 
@@ -23,18 +30,58 @@ abstract interface class SpeechSource {
   void stop();
 }
 
-/// Speaks segments one by one with the platform voice.
-class ReadAloud extends ChangeNotifier {
-  ReadAloud({FlutterTts? tts}) : _tts = tts ?? FlutterTts();
+/// Picks the reading language and the voice that speaks it.
+abstract interface class Voices {
+  /// The language to read [sample] in, given the book's own [declared] one.
+  String languageFor(String sample, String? declared);
 
-  final FlutterTts _tts;
+  /// The best voice for [language]: a downloaded one when it speaks the
+  /// language, else the system's.
+  Future<SpeechEngine> engineFor(String language);
+}
+
+/// Only the platform voices, in the language the text looks like.
+class SystemVoices implements Voices {
+  SystemVoices({SpeechEngine? engine})
+    : _engine = engine ?? SystemSpeechEngine();
+
+  final SpeechEngine _engine;
+
+  @override
+  String languageFor(String sample, String? declared) => resolveLanguage(
+    sample,
+    book: declared,
+    fallback: baseLanguage(PlatformDispatcher.instance.locale.languageCode)!,
+  );
+
+  @override
+  Future<SpeechEngine> engineFor(String language) async => _engine;
+}
+
+/// Speaks a [SpeechSource] sentence by sentence, preparing the next one
+/// while the current one plays.
+class ReadAloud extends ChangeNotifier {
+  ReadAloud({Voices? voices}) : _voices = voices ?? SystemVoices();
+
+  final Voices _voices;
   SpeechSource? _source;
+  SpeechEngine? _engine;
   bool _playing = false;
+  bool _paused = false;
   double _speed = 1.0;
+  String? _language;
   int _run = 0;
 
-  bool get playing => _playing;
+  /// Set when a pause had to stop the sentence, which is then said again.
+  bool _repeat = false;
+  Completer<void>? _resumed;
+
+  bool get playing => _playing && !_paused;
+  bool get paused => _paused;
   bool get active => _source != null;
+
+  /// The language being read, once reading has started.
+  String? get language => _language;
 
   /// 1.0 is normal speed.
   double get speed => _speed;
@@ -42,8 +89,7 @@ class ReadAloud extends ChangeNotifier {
   Future<void> setSpeed(double speed) async {
     _speed = speed;
     notifyListeners();
-    // flutter_tts treats 0.5 as the platform's normal rate.
-    await _tts.setSpeechRate(0.5 * speed);
+    await _engine?.setSpeed(speed);
   }
 
   Future<void> play(SpeechSource source) async {
@@ -52,36 +98,95 @@ class ReadAloud extends ChangeNotifier {
     final run = ++_run;
     _playing = true;
     notifyListeners();
-    await _tts.awaitSpeakCompletion(true);
-    await _tts.setSpeechRate(0.5 * _speed);
     var block = await source.start();
+    if (run != _run) return;
+    final sample = (block ?? const []).map((s) => s.text).join(' ');
+    final language = _language = _voices.languageFor(
+      sample.length > 1000 ? sample.substring(0, 1000) : sample,
+      source.language,
+    );
+    final engine = _engine = await _voices.engineFor(language);
+    await engine.setLanguage(language);
+    await engine.setSpeed(_speed);
+    notifyListeners();
     while (block != null && run == _run) {
-      for (final segment in block) {
+      final segments = [
+        for (final s in block)
+          if (s.text.trim().isNotEmpty) s,
+      ];
+      Future<List<SpeechSegment>?>? upcoming;
+      for (var i = 0; i < segments.length; i++) {
         if (run != _run) return;
-        if (segment.text.trim().isEmpty) continue;
+        final segment = segments[i];
         source.onSegment(segment);
-        await _tts.speak(segment.text);
+        if (i + 1 < segments.length) {
+          engine.prepare(segments[i + 1].text);
+        } else {
+          // Fetch the next block while the last sentence plays.
+          upcoming = source.next().then((next) {
+            final first = next?.where((s) => s.text.trim().isNotEmpty);
+            if (first != null && first.isNotEmpty && run == _run) {
+              engine.prepare(first.first.text);
+            }
+            return next;
+          });
+        }
+        do {
+          if (_resumed case final resumed?) await resumed.future;
+          if (run != _run) return;
+          _repeat = false;
+          await engine.speak(segment.text);
+        } while (_repeat && run == _run);
       }
       if (run != _run) return;
-      block = await source.next();
+      block = await (upcoming ?? source.next());
     }
     if (run == _run) await stop();
+  }
+
+  /// Pauses reading; [resume] carries on from the same sentence.
+  Future<void> pause() async {
+    final engine = _engine;
+    if (!active || _paused) return;
+    _paused = true;
+    _resumed = Completer<void>();
+    notifyListeners();
+    if (engine != null && !await engine.pause()) {
+      _repeat = true;
+      await engine.stop();
+    }
+  }
+
+  Future<void> resume() async {
+    if (!_paused) return;
+    _paused = false;
+    notifyListeners();
+    if (!_repeat) await _engine?.resume();
+    _resumed?.complete();
+    _resumed = null;
   }
 
   Future<void> stop() async {
     _run++;
     final source = _source;
+    final engine = _engine;
     _source = null;
+    _engine = null;
     _playing = false;
+    _paused = false;
+    _repeat = false;
+    _resumed?.complete();
+    _resumed = null;
     notifyListeners();
-    await _tts.stop();
+    await engine?.stop();
     source?.stop();
   }
 
   @override
   void dispose() {
     _run++;
-    _tts.stop();
+    _resumed?.complete();
+    _engine?.stop();
     super.dispose();
   }
 }
@@ -94,7 +199,9 @@ List<SpeechSegment> sentencesOf(String text) {
       .trim();
   if (clean.isEmpty) return const [];
   return [
-    for (final m in RegExp(r'[^.!?…]+(?:[.!?…]+["”’)\]]*|$)').allMatches(clean))
+    for (final m in RegExp(
+      r'[^.!?…。！？]+(?:[.!?…。！？]+["”’」)\]]*|$)',
+    ).allMatches(clean))
       if (m[0]!.trim().isNotEmpty) SpeechSegment(m[0]!.trim()),
   ];
 }

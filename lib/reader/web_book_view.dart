@@ -22,6 +22,9 @@ class TocItem {
 class WebBookController {
   InAppWebViewController? _web;
 
+  /// The open book's declared language, such as 'en-GB'.
+  String? language;
+
   Future<void> _run(String js) async => _web?.evaluateJavascript(source: js);
 
   Future<void> next() => _run('window.reader.next()');
@@ -70,6 +73,9 @@ class WebSpeechSource implements SpeechSource {
   WebSpeechSource(this._controller);
 
   final WebBookController _controller;
+
+  @override
+  String? get language => _controller.language;
 
   @override
   Future<List<SpeechSegment>?> start() => _controller._tts('ttsStart');
@@ -196,6 +202,8 @@ class _WebBookViewState extends State<WebBookView> {
       handlerName: 'opened',
       callback: (args) {
         final d = args.first as Map;
+        final language = '${d['language'] ?? ''}';
+        widget.controller.language = language.isEmpty ? null : language;
         widget.onOpened('${d['title'] ?? ''}', '${d['author'] ?? ''}', [
           for (final item in (d['toc'] as List? ?? const []))
             if (item is Map)
