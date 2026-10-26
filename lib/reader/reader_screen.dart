@@ -267,7 +267,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
               box.maxWidth > box.maxHeight &&
               box.maxWidth >= Breakpoints.expanded;
           return ListenableBuilder(
-            listenable: Listenable.merge([_readAloud, _ink]),
+            listenable: Listenable.merge([_readAloud, _ink, ?services.voices]),
             builder: (context, _) => Stack(
               children: [
                 Positioned.fill(child: _buildBody(spread)),
@@ -598,10 +598,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
   String _voiceLabel() {
     final language = _readAloud.language;
     if (language == null) return 'Reading aloud';
-    final voices = services.voices;
-    final neural = voices != null && voices.usesNeuralFor(language);
-    return '${languageName(language)} · '
-        '${neural ? voices.pack.name : 'System voice'}';
+    final voice = services.voices?.describe(language) ?? 'System voice';
+    return '${languageName(language)} · $voice';
   }
 
   void _showVoiceSettings() {

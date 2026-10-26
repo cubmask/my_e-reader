@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../reader/tts/cloud_voices.dart';
 import '../reader/tts/voice_pack.dart';
 import '../reader/tts/voice_store.dart';
 
@@ -37,6 +39,7 @@ class _VoiceSettingsState extends State<VoiceSettings> {
   VoiceStore get voices => widget.voices;
 
   Future<void> _preview() async {
+    if (_previewing) return;
     setState(() => _previewing = true);
     final language = voices.language ?? 'en';
     final known = _samples.containsKey(language);
@@ -64,6 +67,18 @@ class _VoiceSettingsState extends State<VoiceSettings> {
               child: Text(
                 'Read aloud',
                 style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            _OnlineVoices(
+              voices: voices,
+              onPreview: widget.preview && !_previewing ? _preview : null,
+            ),
+            const Divider(indent: 16, endIndent: 16),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Text(
+                'Offline voice',
+                style: Theme.of(context).textTheme.titleSmall,
               ),
             ),
             _statusTile(context, pack),
@@ -114,7 +129,10 @@ class _VoiceSettingsState extends State<VoiceSettings> {
                       IconButton(
                         tooltip: 'Play a sample',
                         icon: const Icon(Icons.play_circle_outline),
-                        onPressed: _previewing || !voices.useNeural
+                        onPressed:
+                            _previewing ||
+                                !voices.useNeural ||
+                                voices.cloud.ready
                             ? null
                             : _preview,
                       ),
@@ -196,5 +214,261 @@ class _VoiceSettingsState extends State<VoiceSettings> {
         ),
       ),
     };
+  }
+}
+
+/// ElevenLabs or Fish Audio, with the reader's own API key.
+class _OnlineVoices extends StatelessWidget {
+  const _OnlineVoices({required this.voices, this.onPreview});
+
+  final VoiceStore voices;
+  final VoidCallback? onPreview;
+
+  CloudVoiceSettings get cloud => voices.cloud;
+
+  Future<void> _editKey(BuildContext context, CloudProvider provider) async {
+    final controller = TextEditingController(text: cloud.keyFor(provider));
+    final key = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${provider.label} API key'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: controller,
+              obscureText: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: const InputDecoration(labelText: 'API key'),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              icon: const Icon(Icons.open_in_new, size: 18),
+              label: const Text('Get a key'),
+              onPressed: () => launchUrl(
+                Uri.parse(provider.keysUrl),
+                mode: LaunchMode.externalApplication,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (key != null) await cloud.setKey(provider, key);
+  }
+
+  Future<void> _pickVoice(BuildContext context, CloudProvider provider) async {
+    final voice = await showDialog<CloudVoice>(
+      context: context,
+      builder: (context) => _VoicePicker(
+        load: (search) => voices.cloudClient.voices(
+          provider,
+          cloud.keyFor(provider)!,
+          search: search,
+        ),
+      ),
+    );
+    if (voice != null) await cloud.setVoice(provider, voice);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = cloud.provider;
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ListTile(
+          leading: const Icon(Icons.cloud_outlined),
+          title: const Text('Online voice'),
+          subtitle: const Text(
+            'Studio-quality voices while connected; the offline voice takes '
+            'over without a connection. The text being read is sent to the '
+            'service and billed to your account (a novel is roughly 500,000 '
+            'characters).',
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: SegmentedButton<CloudProvider?>(
+            showSelectedIcon: false,
+            segments: [
+              const ButtonSegment(value: null, label: Text('Off')),
+              for (final p in CloudProvider.values)
+                ButtonSegment(value: p, label: Text(p.label)),
+            ],
+            selected: {provider},
+            onSelectionChanged: (v) => cloud.setProvider(v.first),
+          ),
+        ),
+        if (provider != null) ...[
+          ListTile(
+            leading: const Icon(Icons.key_outlined),
+            title: const Text('API key'),
+            subtitle: Text(
+              cloud.hasKey(provider)
+                  ? 'Saved in this device\'s secure storage'
+                  : 'Needed to use ${provider.label}',
+            ),
+            trailing: TextButton(
+              onPressed: () => _editKey(context, provider),
+              child: Text(cloud.hasKey(provider) ? 'Change' : 'Add'),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.tune),
+            title: const Text('Model'),
+            trailing: DropdownButton<String>(
+              value: cloud.modelFor(provider),
+              underline: const SizedBox(),
+              items: [
+                for (final m in provider.models)
+                  DropdownMenuItem(value: m.id, child: Text(m.name)),
+              ],
+              onChanged: (v) => v == null ? null : cloud.setModel(provider, v),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.record_voice_over_outlined),
+            title: const Text('Voice'),
+            subtitle: Text(
+              cloud.voiceFor(provider)?.name ??
+                  (provider == CloudProvider.fishAudio
+                      ? 'Fish Audio\'s default voice'
+                      : 'Pick a voice to start'),
+            ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextButton(
+                  onPressed: cloud.hasKey(provider)
+                      ? () => _pickVoice(context, provider)
+                      : null,
+                  child: const Text('Choose'),
+                ),
+                IconButton(
+                  tooltip: 'Play a sample',
+                  icon: const Icon(Icons.play_circle_outline),
+                  onPressed: cloud.ready ? onPreview : null,
+                ),
+              ],
+            ),
+          ),
+          if (voices.cloudError case final error?)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                'Last time: $error. Read with the offline voice instead.',
+                style: TextStyle(color: theme.colorScheme.error),
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+}
+
+/// Searches a provider's voices, or takes a voice ID typed in.
+class _VoicePicker extends StatefulWidget {
+  const _VoicePicker({required this.load});
+
+  final Future<List<CloudVoice>> Function(String search) load;
+
+  @override
+  State<_VoicePicker> createState() => _VoicePickerState();
+}
+
+class _VoicePickerState extends State<_VoicePicker> {
+  final _search = TextEditingController();
+  late Future<List<CloudVoice>> _voices = widget.load('');
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final typed = _search.text.trim();
+    return AlertDialog(
+      title: const Text('Choose a voice'),
+      content: SizedBox(
+        width: 480,
+        height: 480,
+        child: Column(
+          children: [
+            TextField(
+              controller: _search,
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search),
+                hintText: 'Search, or paste a voice ID',
+              ),
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (v) =>
+                  setState(() => _voices = widget.load(v.trim())),
+            ),
+            if (typed.isNotEmpty)
+              ListTile(
+                leading: const Icon(Icons.badge_outlined),
+                title: Text('Use "$typed" as the voice ID'),
+                onTap: () => Navigator.pop(context, CloudVoice(typed, typed)),
+              ),
+            Expanded(
+              child: FutureBuilder(
+                future: _voices,
+                builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    return Center(child: Text('${snapshot.error}'));
+                  }
+                  final voices = snapshot.data;
+                  if (voices == null) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (voices.isEmpty) {
+                    return const Center(child: Text('No voices found'));
+                  }
+                  return ListView(
+                    children: [
+                      for (final v in voices)
+                        ListTile(
+                          title: Text(v.name),
+                          subtitle: v.details.isEmpty
+                              ? null
+                              : Text(
+                                  v.details,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                          onTap: () => Navigator.pop(context, v),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ],
+    );
   }
 }
