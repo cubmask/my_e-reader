@@ -9,7 +9,15 @@ The full architecture and roadmap are in the
 
 ## Status
 
-Phase 2 adds DjVu (rendered with DjVu.js), CBR and RAR (UnRAR compiled to WebAssembly, run in a worker), and ZIP. An archive that holds one book opens as that book; one full of page images opens as a comic.
+Phase 3 adds notes and read-aloud:
+
+- Select text to highlight it in yellow, green, blue or pink, with an optional note. Tap a highlight to recolour, edit or delete it.
+- Bookmark any page, including PDF pages. The notes button lists the book's highlights and bookmarks.
+- The Notes tab lists every highlight across the library, with search and a copy-as-Markdown export. Tap one to jump back into the book.
+- Highlights and notes sync through a hidden `annotations.json` in Drive's app data folder, like reading progress.
+- Read aloud uses the system voices (Samsung or Google on Android). It highlights each sentence as it's spoken, turns pages and chapters by itself, and runs at 0.75x to 2x speed. PDFs are read page by page.
+
+Phase 2 added DjVu (rendered with DjVu.js), CBR and RAR (UnRAR compiled to WebAssembly, run in a worker), and ZIP. An archive that holds one book opens as that book; one full of page images opens as a comic.
 
 Phase 1 (MVP reader) added:
 

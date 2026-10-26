@@ -44,6 +44,7 @@ dependencies:
   flutter_inappwebview: ^6.2.0-beta.3
   pdfrx: ^2.10.1
   path_provider: ^2.1.6
+  flutter_tts: ^4.2.5
 
 dev_dependencies:
   flutter_test:
