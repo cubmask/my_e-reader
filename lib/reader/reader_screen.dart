@@ -85,11 +85,25 @@ class _ReaderScreenState extends State<ReaderScreen> {
           .then((url) => setState(() => _streamUrl = url));
       return;
     }
+    _fetch();
+  }
+
+  /// Opens a local copy, fetching the whole book from Drive if needed.
+  void _fetch() {
     services.cache
-        .open(book, onProgress: (v) => setState(() => _download = v))
+        .open(
+          book,
+          onProgress: (v) {
+            if (mounted) setState(() => _download = v);
+          },
+        )
         .then(
-          (file) => setState(() => _file = file),
-          onError: (Object e) => setState(() => _error = '$e'),
+          (file) {
+            if (mounted) setState(() => _file = file);
+          },
+          onError: (Object e) {
+            if (mounted) setState(() => _error = '$e');
+          },
         );
   }
 
@@ -330,6 +344,10 @@ class _ReaderScreenState extends State<ReaderScreen> {
           initialPage: _initialPdfPage,
           spread: spread,
           onToggleControls: _toggleControls,
+          onStreamFailed: () {
+            setState(() => _streamUrl = null);
+            _fetch();
+          },
           bookId: book.driveFileId,
           ink: services.ink,
           inkController: _ink,

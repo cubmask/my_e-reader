@@ -70,4 +70,33 @@ void main() {
     expect(bad.statusCode, 404);
     expect(seen, hasLength(1));
   });
+
+  test('passes Drive errors on without the error body', () async {
+    final drive = MockClient(
+      (request) async => http.Response(
+        '{"error": {"code": 403}}',
+        403,
+        headers: {'content-type': 'application/json'},
+      ),
+    );
+    final server = ReaderServer(bundle: _Bundle(), drive: drive);
+    addTearDown(server.close);
+
+    final reply = await http.get(await server.driveUrl('abc'));
+    expect(reply.statusCode, 403);
+    expect(reply.bodyBytes, isEmpty);
+  });
+
+  test('asks Drive for unencoded bytes', () async {
+    final seen = <http.BaseRequest>[];
+    final drive = MockClient((request) async {
+      seen.add(request);
+      return http.Response.bytes([1], 200);
+    });
+    final server = ReaderServer(bundle: _Bundle(), drive: drive);
+    addTearDown(server.close);
+
+    await http.get(await server.driveUrl('abc'));
+    expect(seen.single.headers['accept-encoding'], 'identity');
+  });
 }

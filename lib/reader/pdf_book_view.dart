@@ -5,6 +5,7 @@ import 'package:pdfrx/pdfrx.dart';
 
 import '../notes/ink_store.dart';
 import 'ink_layer.dart';
+import 'pdf_errors.dart';
 import 'pdf_spread.dart';
 import 'read_aloud.dart';
 
@@ -19,6 +20,7 @@ class PdfBookView extends StatefulWidget {
     required this.spread,
     required this.onPageChanged,
     required this.onToggleControls,
+    this.onStreamFailed,
     required this.bookId,
     required this.ink,
     required this.inkController,
@@ -38,12 +40,21 @@ class PdfBookView extends StatefulWidget {
   final void Function(int page, int pageCount) onPageChanged;
   final VoidCallback onToggleControls;
 
+  /// Called when the book will not open from [streamUrl], so the caller can
+  /// fetch the whole file and open that instead.
+  ///
+  /// Streaming hands PDFium the book one range request at a time, and PDFium
+  /// reports any failed request while opening as a damaged file, so the
+  /// error says nothing about the book itself.
+  final VoidCallback? onStreamFailed;
+
   @override
   State<PdfBookView> createState() => _PdfBookViewState();
 }
 
 class _PdfBookViewState extends State<PdfBookView> {
   PdfViewerController get _controller => widget.controller;
+  bool _streamFailed = false;
 
   @override
   void didUpdateWidget(PdfBookView old) {
@@ -53,9 +64,35 @@ class _PdfBookViewState extends State<PdfBookView> {
     }
   }
 
+  Widget _errorBanner(BuildContext context, Object error) {
+    final onStreamFailed = widget.onStreamFailed;
+    if (widget.streamUrl != null && onStreamFailed != null) {
+      if (!_streamFailed) {
+        _streamFailed = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) => onStreamFailed());
+      }
+      return const Center(child: CircularProgressIndicator());
+    }
+    final file = widget.file;
+    return FutureBuilder(
+      future: file == null ? Future.value(true) : looksLikePdf(file),
+      builder: (context, isPdf) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Text(
+            isPdf.hasData ? pdfErrorMessage(error, isPdf: isPdf.data!) : '',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final params = PdfViewerParams(
+      errorBannerBuilder: (context, error, _, _) =>
+          _errorBanner(context, error),
       backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
       layoutPages: widget.spread
           ? (pages, params) {
