@@ -75,8 +75,22 @@ class ReaderServer {
     );
     final range = request.headers.value(HttpHeaders.rangeHeader);
     if (range != null) upstream.headers[HttpHeaders.rangeHeader] = range;
-    final reply = await drive.send(upstream);
+    // Raw bytes, so the length and range Drive reports match the body.
+    upstream.headers[HttpHeaders.acceptEncodingHeader] = 'identity';
+    final http.StreamedResponse reply;
+    try {
+      reply = await drive.send(upstream);
+    } catch (_) {
+      response.statusCode = HttpStatus.badGateway;
+      return;
+    }
     response.statusCode = reply.statusCode;
+    if (reply.statusCode != HttpStatus.ok &&
+        reply.statusCode != HttpStatus.partialContent) {
+      // Drive's error is JSON; it must never reach the viewer as book bytes.
+      await reply.stream.drain<void>();
+      return;
+    }
     for (final name in _relayedHeaders) {
       final value = reply.headers[name];
       if (value != null) response.headers.set(name, value);
