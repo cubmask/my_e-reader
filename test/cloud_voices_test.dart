@@ -20,13 +20,13 @@ class _Engine implements SpeechEngine {
   bool stopped = false;
 
   @override
-  Future<void> speak(String text) async {
+  Future<void> speak(String text, [SpeechContext? context]) async {
     if (fails) throw const CloudVoiceException('No connection');
     spoken.add(text);
   }
 
   @override
-  void prepare(String text) {}
+  void prepare(String text, [SpeechContext? context]) {}
   @override
   Future<bool> pause() async => true;
   @override
@@ -270,6 +270,8 @@ void main() {
     expect(again.ready, isFalse);
   });
 
+  _stitchingAndCache();
+
   test('a failing voice hands the same sentence to the fallback', () async {
     final online = _Engine('online', fails: true);
     final offline = _Engine('offline');
@@ -289,5 +291,145 @@ void main() {
     expect(offline.speed, 1.5);
     expect(online.stopped, isTrue);
     expect('$reported', 'No connection');
+  });
+}
+
+void _stitchingAndCache() {
+  test('ElevenLabs gets the neighbouring sentences, trimmed', () async {
+    late http.Request sent;
+    final client = CloudTtsClient(
+      MockClient((request) async {
+        sent = request;
+        return http.Response.bytes([1], 200);
+      }),
+    );
+    await client.speak(
+      CloudProvider.elevenLabs,
+      'k',
+      text: 'Two.',
+      model: 'eleven_v4',
+      voice: 'v',
+      language: 'en',
+      speed: 1,
+      context: (previous: 'x' * 600 + 'One.', next: 'Three.'),
+    );
+    final body = jsonDecode(sent.body) as Map;
+    expect(body['previous_text'], hasLength(500));
+    expect(body['previous_text'], endsWith('One.'));
+    expect(body['next_text'], 'Three.');
+  });
+
+  test('a model that refuses context is asked again without it', () async {
+    final bodies = <Map>[];
+    final client = CloudTtsClient(
+      MockClient((request) async {
+        final body = jsonDecode(request.body) as Map;
+        bodies.add(body);
+        return body.containsKey('previous_text')
+            ? http.Response(jsonEncode({'detail': 'not supported'}), 400)
+            : http.Response.bytes([1], 200);
+      }),
+    );
+    Future<void> speak() => client.speak(
+      CloudProvider.elevenLabs,
+      'k',
+      text: 'Two.',
+      model: 'test_model_without_stitching',
+      voice: 'v',
+      language: 'en',
+      speed: 1,
+      context: (previous: 'One.', next: null),
+    );
+    await speak();
+    expect(bodies.map((b) => b.containsKey('previous_text')), [true, false]);
+    // Remembered: later sentences skip the failing request.
+    await speak();
+    expect(bodies, hasLength(3));
+    expect(bodies.last.containsKey('previous_text'), isFalse);
+  });
+
+  test('Fish Audio requests carry no context fields', () async {
+    late http.Request sent;
+    final client = CloudTtsClient(
+      MockClient((request) async {
+        sent = request;
+        return http.Response.bytes([1], 200);
+      }),
+    );
+    await client.speak(
+      CloudProvider.fishAudio,
+      'k',
+      text: 'Two.',
+      model: 'drama-3',
+      voice: '',
+      language: 'en',
+      speed: 1,
+      context: (previous: 'One.', next: 'Three.'),
+    );
+    expect(jsonDecode(sent.body), isNot(contains('previous_text')));
+  });
+
+  group('saved audio', () {
+    late Directory dir;
+    setUp(() async => dir = await Directory.systemTemp.createTemp('cache'));
+    tearDown(() => dir.delete(recursive: true));
+
+    test('a passage read again costs no second request', () async {
+      var requests = 0;
+      final cache = AudioCache(Directory('${dir.path}/cache'));
+      CloudSynthesizer synth(String voice) => CloudSynthesizer(
+        CloudTtsClient(
+          MockClient((_) async {
+            requests++;
+            return http.Response.bytes([requests], 200);
+          }),
+        ),
+        CloudProvider.fishAudio,
+        'k',
+        model: 'drama-3',
+        voice: voice,
+        outDir: Directory('${dir.path}/out'),
+        cache: cache,
+      );
+      Future<List<int>> read(CloudSynthesizer s, String text) async {
+        final path = await s.synthesize(
+          text,
+          language: 'en',
+          speaker: 0,
+          speed: 1,
+        );
+        final bytes = await File(path).readAsBytes();
+        await File(path).delete(); // As the engine does after playing.
+        return bytes;
+      }
+
+      final first = synth('a');
+      expect(await read(first, 'Hello.'), [1]);
+      expect(await read(first, 'Hello.'), [1]);
+      expect(await read(synth('a'), 'Hello.'), [1], reason: 'survives');
+      expect(requests, 1);
+      // A different voice or sentence is new audio.
+      expect(await read(synth('b'), 'Hello.'), [2]);
+      expect(await read(first, 'Bye.'), [3]);
+      expect(await cache.size(), 3);
+
+      await cache.clear();
+      expect(await cache.size(), 0);
+      expect(await read(first, 'Hello.'), [4]);
+    });
+
+    test('drops the least recently played audio past the limit', () async {
+      final cache = AudioCache(dir, maxBytes: 250);
+      for (final key in ['a', 'b', 'c']) {
+        await cache.store(key, List.filled(100, 0));
+        await File('${dir.path}/$key.mp3')
+            .setLastModified(DateTime(2026, 1, 1 + key.codeUnitAt(0)));
+      }
+      await cache.lookup('a'); // Played again just now.
+      await cache.prune();
+      expect(await cache.lookup('b'), isNull);
+      expect(await cache.lookup('a'), isNotNull);
+      expect(await cache.size(), 200);
+    });
   });
 }

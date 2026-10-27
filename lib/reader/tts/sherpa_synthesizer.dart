@@ -70,6 +70,7 @@ class SherpaSynthesizer implements Synthesizer {
     required String language,
     required int speaker,
     required double speed,
+    SpeechContext? context,
   }) {
     final id = _next++;
     final done = _pending[id] = Completer<String>();

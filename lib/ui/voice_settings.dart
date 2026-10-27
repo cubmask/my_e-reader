@@ -367,6 +367,23 @@ class _OnlineVoices extends StatelessWidget {
               ],
             ),
           ),
+          FutureBuilder(
+            future: voices.audioCache.size(),
+            builder: (context, size) => ListTile(
+              leading: const Icon(Icons.save_outlined),
+              title: const Text('Saved audio'),
+              subtitle: Text(
+                '${size.hasData ? _megabytes(size.data!) : '...'} of read '
+                'passages, replayed without using credits',
+              ),
+              trailing: TextButton(
+                onPressed: (size.data ?? 0) == 0
+                    ? null
+                    : voices.clearAudioCache,
+                child: const Text('Clear'),
+              ),
+            ),
+          ),
           if (voices.cloudError case final error?)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),

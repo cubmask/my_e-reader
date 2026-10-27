@@ -4,13 +4,17 @@ import 'dart:io';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
+/// The sentences around the one being spoken, which some voices use to
+/// carry the intonation across.
+typedef SpeechContext = ({String? previous, String? next});
+
 /// Turns sentences into speech, one at a time.
 abstract interface class SpeechEngine {
   /// Speaks [text], completing once it has been spoken or stopped.
-  Future<void> speak(String text);
+  Future<void> speak(String text, [SpeechContext? context]);
 
   /// A hint that [text] is spoken next, so it can be prepared ahead.
-  void prepare(String text);
+  void prepare(String text, [SpeechContext? context]);
 
   /// Pauses mid-sentence; false when the engine can only stop.
   Future<bool> pause();
@@ -34,7 +38,7 @@ class SystemSpeechEngine implements SpeechEngine {
   bool _awaiting = false;
 
   @override
-  Future<void> speak(String text) async {
+  Future<void> speak(String text, [SpeechContext? context]) async {
     if (!_awaiting) {
       _awaiting = true;
       await _tts.awaitSpeakCompletion(true);
@@ -43,7 +47,7 @@ class SystemSpeechEngine implements SpeechEngine {
   }
 
   @override
-  void prepare(String text) {}
+  void prepare(String text, [SpeechContext? context]) {}
 
   @override
   Future<bool> pause() async => false;
@@ -70,13 +74,14 @@ class SystemSpeechEngine implements SpeechEngine {
   }
 }
 
-/// Renders a sentence to a WAV file.
+/// Renders a sentence to an audio file.
 abstract interface class Synthesizer {
   Future<String> synthesize(
     String text, {
     required String language,
     required int speaker,
     required double speed,
+    SpeechContext? context,
   });
 }
 
@@ -107,15 +112,19 @@ class NeuralSpeechEngine implements SpeechEngine {
 
   String _key(String text) => '$_language|$speaker|$_speed|$text';
 
-  Future<String> _render(String text) => _rendered.putIfAbsent(
-    _key(text),
-    () => _synth.synthesize(
-      text,
-      language: _language,
-      speaker: speaker,
-      speed: _speed,
-    ),
-  );
+  // The context is left out of the key so a sentence prepared ahead is
+  // never rendered twice.
+  Future<String> _render(String text, SpeechContext? context) =>
+      _rendered.putIfAbsent(
+        _key(text),
+        () => _synth.synthesize(
+          text,
+          language: _language,
+          speaker: speaker,
+          speed: _speed,
+          context: context,
+        ),
+      );
 
   void _discardRendered() {
     for (final path in _rendered.values) {
@@ -128,12 +137,12 @@ class NeuralSpeechEngine implements SpeechEngine {
       File(path).delete().then((_) {}, onError: (_) {});
 
   @override
-  Future<void> speak(String text) async {
+  Future<void> speak(String text, [SpeechContext? context]) async {
     final run = _run;
     final key = _key(text);
     final String path;
     try {
-      path = await _render(text);
+      path = await _render(text, context);
     } finally {
       _rendered.remove(key);
     }
@@ -146,7 +155,8 @@ class NeuralSpeechEngine implements SpeechEngine {
   }
 
   @override
-  void prepare(String text) => _render(text).then((_) {}, onError: (_) {});
+  void prepare(String text, [SpeechContext? context]) =>
+      _render(text, context).then((_) {}, onError: (_) {});
 
   @override
   Future<bool> pause() async {
@@ -245,10 +255,10 @@ class FallbackSpeechEngine implements SpeechEngine {
   double? _speed;
 
   @override
-  Future<void> speak(String text) async {
+  Future<void> speak(String text, [SpeechContext? context]) async {
     final run = _run;
     try {
-      await _current.speak(text);
+      await _current.speak(text, context);
     } catch (e) {
       if (_fellBack) rethrow;
       _fellBack = true;
@@ -259,12 +269,13 @@ class FallbackSpeechEngine implements SpeechEngine {
       if (_speed case final speed?) await next.setSpeed(speed);
       _current = next;
       unawaited(failed.stop());
-      if (run == _run) await next.speak(text);
+      if (run == _run) await next.speak(text, context);
     }
   }
 
   @override
-  void prepare(String text) => _current.prepare(text);
+  void prepare(String text, [SpeechContext? context]) =>
+      _current.prepare(text, context);
 
   @override
   Future<bool> pause() => _current.pause();

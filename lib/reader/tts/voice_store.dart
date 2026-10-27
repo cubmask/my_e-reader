@@ -32,7 +32,13 @@ class VoiceStore extends ChangeNotifier implements Voices {
     SpeechEngine? system,
     String Function()? deviceLanguage,
     CloudVoiceSettings? cloud,
+    AudioCache? audioCache,
   }) : cloud = cloud ?? CloudVoiceSettings(),
+       audioCache =
+           audioCache ??
+           AudioCache(
+             Directory(p.join(Directory.systemTemp.path, 'tts-cache')),
+           ),
        _client = client ?? http.Client(),
        _startSynthesizer = synthesizer,
        _audioOut = audioOut ?? PlayerAudioOut.new,
@@ -50,6 +56,9 @@ class VoiceStore extends ChangeNotifier implements Voices {
 
   /// The online voice settings.
   final CloudVoiceSettings cloud;
+
+  /// Online audio already paid for, replayed when a passage is read again.
+  final AudioCache audioCache;
   final VoicePack pack;
   final http.Client _client;
   final SynthesizerFactory? _startSynthesizer;
@@ -197,6 +206,7 @@ class VoiceStore extends ChangeNotifier implements Voices {
           model: model,
           voice: voice,
           outDir: Directory(p.join(Directory.systemTemp.path, 'tts-online')),
+          cache: audioCache,
         ),
         _player,
       );
@@ -305,6 +315,11 @@ class VoiceStore extends ChangeNotifier implements Voices {
     _status = VoiceStatus.notInstalled;
     notifyListeners();
     if (await modelDir.exists()) await modelDir.delete(recursive: true);
+  }
+
+  Future<void> clearAudioCache() async {
+    await audioCache.clear();
+    notifyListeners();
   }
 
   /// Space the installed voice takes.
