@@ -7,7 +7,8 @@ import 'library_screen.dart';
 import 'notes_screen.dart';
 import 'settings_screen.dart';
 
-/// Top-level navigation: a rail on tablets and desktops, a bottom bar on phones.
+/// Top-level navigation: a slim icon rail on tablets and desktops, a bottom
+/// bar on phones.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key, required this.controller});
 
@@ -21,9 +22,9 @@ class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
   static const _destinations = [
-    (Icons.home_outlined, Icons.home, 'Home'),
-    (Icons.local_library_outlined, Icons.local_library, 'Library'),
-    (Icons.sticky_note_2_outlined, Icons.sticky_note_2, 'Notes'),
+    (Icons.home_outlined, Icons.home_rounded, 'Home'),
+    (Icons.import_contacts_outlined, Icons.import_contacts, 'Library'),
+    (Icons.bookmark_border, Icons.bookmark, 'Notes'),
     (Icons.settings_outlined, Icons.settings, 'Settings'),
   ];
 
@@ -42,6 +43,8 @@ class _HomeShellState extends State<HomeShell> {
         body: SafeArea(child: page),
         bottomNavigationBar: NavigationBar(
           selectedIndex: _index,
+          labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
+          height: 68,
           onDestinationSelected: (i) => setState(() => _index = i),
           destinations: [
             for (final (icon, selected, label) in _destinations)
@@ -55,26 +58,91 @@ class _HomeShellState extends State<HomeShell> {
       );
     }
 
-    final extended = width >= Breakpoints.expanded;
     return Scaffold(
       body: SafeArea(
         child: Row(
           children: [
-            NavigationRail(
-              extended: extended,
-              labelType: extended ? null : NavigationRailLabelType.all,
+            AppRail(
               selectedIndex: _index,
-              onDestinationSelected: (i) => setState(() => _index = i),
-              destinations: [
-                for (final (icon, selected, label) in _destinations)
-                  NavigationRailDestination(
-                    icon: Icon(icon),
-                    selectedIcon: Icon(selected),
-                    label: Text(label),
-                  ),
-              ],
+              onSelected: (i) => setState(() => _index = i),
+              destinations: _destinations,
             ),
             Expanded(child: page),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The icon rail down the left edge: the app mark at the top, the
+/// destinations centred, and a coral disc behind the current one.
+class AppRail extends StatelessWidget {
+  const AppRail({
+    super.key,
+    required this.selectedIndex,
+    required this.onSelected,
+    required this.destinations,
+  });
+
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+  final List<(IconData, IconData, String)> destinations;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox(
+      width: 112,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(
+            right: BorderSide(color: scheme.outlineVariant, width: 1),
+          ),
+        ),
+        child: Column(
+          children: [
+            const SizedBox(height: 32),
+            Icon(
+              Icons.auto_stories_outlined,
+              size: 34,
+              color: scheme.onSurface,
+            ),
+            const Spacer(),
+            for (final (i, (icon, selected, label)) in destinations.indexed)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Semantics(
+                  selected: i == selectedIndex,
+                  button: true,
+                  child: IconButton(
+                    tooltip: label,
+                    iconSize: 28,
+                    isSelected: i == selectedIndex,
+                    icon: Icon(icon),
+                    selectedIcon: Icon(selected),
+                    style:
+                        IconButton.styleFrom(
+                          fixedSize: const Size.square(64),
+                          foregroundColor: scheme.onSurface,
+                          backgroundColor: Colors.transparent,
+                        ).copyWith(
+                          backgroundColor: WidgetStateProperty.resolveWith(
+                            (s) => s.contains(WidgetState.selected)
+                                ? scheme.primary
+                                : Colors.transparent,
+                          ),
+                          foregroundColor: WidgetStateProperty.resolveWith(
+                            (s) => s.contains(WidgetState.selected)
+                                ? scheme.onPrimary
+                                : scheme.onSurface,
+                          ),
+                        ),
+                    onPressed: () => onSelected(i),
+                  ),
+                ),
+              ),
+            const Spacer(flex: 2),
           ],
         ),
       ),

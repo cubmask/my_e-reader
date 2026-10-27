@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../library/book.dart';
 import '../reader/reader_services.dart';
+import 'theme.dart';
 
 /// Covers are drawn at the usual 2:3 book shape.
 const coverAspectRatio = 2 / 3;
@@ -33,20 +34,34 @@ class BookCover extends StatelessWidget {
       child: AspectRatio(
         aspectRatio: coverAspectRatio,
         child: DecoratedBox(
+          // A long soft shadow falling down and right, plus a tight one
+          // where the book meets the page, so covers sit like hardbacks.
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(4),
+            borderRadius: BorderRadius.circular(3),
             boxShadow: const [
               BoxShadow(
-                color: Color(0x33000000),
-                blurRadius: 12,
-                offset: Offset(0, 6),
+                color: Color(0x40000000),
+                blurRadius: 28,
+                offset: Offset(10, 18),
+                spreadRadius: -4,
+              ),
+              BoxShadow(
+                color: Color(0x26000000),
+                blurRadius: 4,
+                offset: Offset(1, 2),
               ),
             ],
           ),
           child: ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: image != null
-                ? Image.file(
+            borderRadius: const BorderRadius.horizontal(
+              left: Radius.circular(2),
+              right: Radius.circular(4),
+            ),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (image != null)
+                  Image.file(
                     image,
                     fit: BoxFit.cover,
                     errorBuilder: (_, _, _) => GeneratedCover(
@@ -55,11 +70,43 @@ class BookCover extends StatelessWidget {
                       author: author,
                     ),
                   )
-                : GeneratedCover(
+                else
+                  GeneratedCover(
                     seed: book.driveFileId,
                     title: title,
                     author: author,
                   ),
+                const _Spine(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The hinge of a hardback: a dark fold and a glint of light near the left
+/// edge, and a faint sheen across the cover.
+class _Spine extends StatelessWidget {
+  const _Spine();
+
+  @override
+  Widget build(BuildContext context) {
+    return const IgnorePointer(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              Color(0x4D000000),
+              Color(0x1FFFFFFF),
+              Color(0x00FFFFFF),
+              Color(0x26000000),
+              Color(0x00000000),
+              Color(0x0FFFFFFF),
+              Color(0x00000000),
+            ],
+            stops: [0, 0.025, 0.045, 0.06, 0.09, 0.5, 1],
           ),
         ),
       ),
@@ -127,9 +174,8 @@ class GeneratedCover extends StatelessWidget {
                       color: Colors.white,
                       fontSize: 17 * scale,
                       height: 1.15,
-                      fontWeight: FontWeight.w600,
-                      fontFamily: 'serif',
-                      fontFamilyFallback: const ['Georgia', 'Times New Roman'],
+                      fontWeight: FontWeight.w500,
+                      fontFamily: AppFonts.serif,
                     ),
                   ),
                 ),

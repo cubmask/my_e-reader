@@ -115,13 +115,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final duplicates = duplicatesIn(widget.controller).length;
     final theme = Theme.of(context);
     final wide = MediaQuery.sizeOf(context).width >= Breakpoints.medium;
-    final pad = wide ? 32.0 : 16.0;
+    final pad = wide ? 48.0 : 20.0;
     return RefreshIndicator(
       onRefresh: widget.controller.refresh,
       child: CustomScrollView(
         slivers: [
           SliverPadding(
-            padding: EdgeInsets.fromLTRB(pad, wide ? 32 : 16, pad, 12),
+            padding: EdgeInsets.fromLTRB(pad, wide ? 56 : 24, pad, 16),
             sliver: SliverToBoxAdapter(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -129,7 +129,39 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   Row(
                     children: [
                       Expanded(
-                        child: Text('Library', style: largeTitle(context)),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.baseline,
+                          textBaseline: TextBaseline.alphabetic,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                'Library',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: largeTitle(context),
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Text.rich(
+                              TextSpan(
+                                children: [
+                                  TextSpan(
+                                    text: '${books.length}'.padLeft(2, '0'),
+                                    style: TextStyle(
+                                      color: theme.colorScheme.primary,
+                                    ),
+                                  ),
+                                  TextSpan(
+                                    text: books.length == 1
+                                        ? ' book'
+                                        : ' books',
+                                  ),
+                                ],
+                              ),
+                              style: theme.textTheme.titleMedium,
+                            ),
+                          ],
+                        ),
                       ),
                       PopupMenuButton<_Sort>(
                         tooltip: 'Sort',
@@ -147,15 +179,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  SearchBar(
-                    hintText: 'Search titles and authors',
-                    leading: const Icon(Icons.search),
-                    elevation: const WidgetStatePropertyAll(0),
-                    backgroundColor: WidgetStatePropertyAll(
-                      theme.colorScheme.surfaceContainerHigh,
+                  const SizedBox(height: 20),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 560),
+                    child: SearchBar(
+                      hintText: 'Search book name, author …',
+                      leading: const Icon(Icons.search),
+                      onChanged: (v) => setState(() => _query = v),
                     ),
-                    onChanged: (v) => setState(() => _query = v),
                   ),
                 ],
               ),
@@ -238,11 +269,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
             padding: EdgeInsets.fromLTRB(pad, 24, pad, 32),
             sliver: SliverGrid.builder(
               gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: wide ? 190 : 150,
-                // Cover plus one status row.
-                childAspectRatio: 0.56,
-                crossAxisSpacing: wide ? 28 : 16,
-                mainAxisSpacing: wide ? 32 : 24,
+                maxCrossAxisExtent: wide ? 200 : 150,
+                // Cover, title and author, and one status row.
+                childAspectRatio: wide ? 0.47 : 0.44,
+                crossAxisSpacing: wide ? 36 : 20,
+                mainAxisSpacing: wide ? 36 : 24,
               ),
               itemCount: shown.length,
               itemBuilder: (context, i) =>
@@ -301,10 +332,78 @@ enum _Sort {
   final String label;
 }
 
-/// The big bold page title used across the app, as in Apple Books.
+/// The big serif page title used across the app.
 TextStyle? largeTitle(BuildContext context) =>
-    Theme.of(context).textTheme.headlineLarge
-        ?.copyWith(fontWeight: FontWeight.w800);
+    Theme.of(context).textTheme.displaySmall;
+
+/// A cover on a Home shelf with its title and, in italics, its author.
+/// Tap to read; long-press for the book's details.
+class ShelfBook extends StatelessWidget {
+  const ShelfBook({super.key, required this.book, required this.services});
+
+  final Book book;
+  final ReaderServices services;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GestureDetector(
+          onTap: () => openBook(context, book, services),
+          onLongPress: () => showBookSheet(context, book, services),
+          onSecondaryTap: () => showBookSheet(context, book, services),
+          child: Semantics(
+            button: true,
+            label: services.meta.titleOf(book),
+            child: BookCover(book: book, services: services),
+          ),
+        ),
+        const SizedBox(height: 16),
+        _TitleAndAuthor(book: book, services: services),
+      ],
+    );
+  }
+}
+
+class _TitleAndAuthor extends StatelessWidget {
+  const _TitleAndAuthor({required this.book, required this.services});
+
+  final Book book;
+  final ReaderServices? services;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final author = services?.meta.authorOf(book) ?? '';
+    // Always two lines tall, so covers in a row line up.
+    final style = theme.textTheme.bodyMedium?.copyWith(
+      fontWeight: FontWeight.w500,
+      height: 1.45,
+    );
+    return SizedBox(
+      height: 2 * 1.45 * (style?.fontSize ?? 14) + 2,
+      child: Text.rich(
+        TextSpan(
+          text: services?.meta.titleOf(book) ?? book.displayTitle,
+          children: [
+            if (author.isNotEmpty)
+              TextSpan(
+                text: '\n$author',
+                style: TextStyle(
+                  fontStyle: FontStyle.italic,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+          ],
+        ),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: style,
+      ),
+    );
+  }
+}
 
 /// A cover in the library grid, with its progress and a "more" button.
 /// Tap to read; long-press or "more" for the book's details.
@@ -348,7 +447,8 @@ class LibraryBookTile extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 14),
+        _TitleAndAuthor(book: book, services: services),
         SizedBox(
           height: 32,
           child: Row(
@@ -356,12 +456,12 @@ class LibraryBookTile extends StatelessWidget {
               if (label == 'New')
                 Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
+                    horizontal: 8,
                     vertical: 2,
                   ),
                   decoration: BoxDecoration(
                     color: theme.colorScheme.primary,
-                    borderRadius: BorderRadius.circular(4),
+                    borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
                     'NEW',

@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,11 +9,13 @@ import '../library/book.dart';
 import '../library/cover_store.dart' show CoverKind;
 import '../notes/annotation_store.dart';
 import '../ui/breakpoints.dart';
+import '../ui/theme.dart';
 import '../ui/voice_settings.dart';
 import 'book_cache.dart';
 import 'ink_layer.dart';
 import 'pdf_book_view.dart';
 import 'progress_store.dart';
+import 'reader_chrome.dart';
 import 'read_aloud.dart';
 import 'tts/background_audio.dart';
 import 'tts/voice_pack.dart';
@@ -22,12 +23,7 @@ import 'reader_services.dart';
 import 'reader_settings.dart';
 import 'web_book_view.dart';
 
-const highlightSwatches = {
-  HighlightColor.yellow: Color(0xFFF9D71C),
-  HighlightColor.green: Color(0xFF5FD068),
-  HighlightColor.blue: Color(0xFF4AA8FF),
-  HighlightColor.pink: Color(0xFFFF6FAE),
-};
+export 'reader_chrome.dart' show highlightSwatches;
 
 class ReaderScreen extends StatefulWidget {
   const ReaderScreen({
@@ -306,10 +302,17 @@ class _ReaderScreenState extends State<ReaderScreen> {
                   )
                 else if (_selection != null)
                   Positioned(
-                    bottom: 24,
-                    left: 0,
-                    right: 0,
-                    child: Center(child: _buildSelectionBar()),
+                    bottom: 32,
+                    left: 16,
+                    right: 16,
+                    child: SafeArea(
+                      child: Center(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: _buildSelectionBar(),
+                        ),
+                      ),
+                    ),
                   )
                 else if (_ready && (_controls || _readAloud.active))
                   Positioned(
@@ -327,9 +330,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   Color _background() => switch (services.settings.theme) {
-    ReaderTheme.light => Colors.white,
+    ReaderTheme.light => const Color(0xFFFBF9F4),
     ReaderTheme.sepia => const Color(0xFFF4ECD8),
-    ReaderTheme.dark => const Color(0xFF121212),
+    ReaderTheme.dark => const Color(0xFF1B1A18),
   };
 
   Widget _buildBody(bool spread) {
@@ -426,98 +429,76 @@ class _ReaderScreenState extends State<ReaderScreen> {
     );
   }
 
-  /// Frosted bars tinted like the page, as in Apple Books, in light or dark
-  /// to match the reading theme.
+  /// Floating controls tinted like the page, in light or dark to match the
+  /// reading theme.
   Widget _chrome(Widget child) {
     final dark = services.settings.theme == ReaderTheme.dark;
     final base = Theme.of(context);
-    final theme = dark == (base.brightness == Brightness.dark)
-        ? base
-        : ThemeData(
-            colorScheme: ColorScheme.fromSeed(
-              seedColor: base.colorScheme.primary,
-              brightness: dark ? Brightness.dark : Brightness.light,
-            ),
-          );
+    if (dark == (base.brightness == Brightness.dark)) return child;
     return Theme(
-      data: theme,
-      child: ClipRect(
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-          child: Material(
-            color: _background().withValues(alpha: 0.82),
-            child: child,
-          ),
-        ),
-      ),
+      data: buildAppTheme(dark ? Brightness.dark : Brightness.light),
+      child: child,
     );
   }
 
   Widget _buildTopBar() {
-    final bookmarked = _bookmarkHere != null;
+    final paper = _background();
     return _chrome(
       SafeArea(
         bottom: false,
-        child: SizedBox(
-          height: 56,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
           child: Row(
             children: [
-              const BackButton(),
+              FloatingPill(
+                paper: paper,
+                padding: const EdgeInsets.all(4),
+                child: const BackButton(),
+              ),
+              const SizedBox(width: 12),
               Expanded(
-                child: Text(
-                  _title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium,
+                child: Center(
+                  child: FloatingPill(
+                    paper: paper,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 10,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontFamily: AppFonts.serif),
+                        ),
+                        if (_chapter.isNotEmpty)
+                          Text(
+                            _chapter,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
-              if (_ready) ...[
-                _DownloadButton(book: book, cache: services.cache),
-                IconButton(
-                  tooltip: _readAloud.active
-                      ? 'Stop reading aloud'
-                      : 'Read aloud',
-                  icon: Icon(
-                    _readAloud.active ? Icons.stop_circle : Icons.headphones,
-                  ),
-                  onPressed: _toggleReadAloud,
-                ),
-                IconButton(
-                  tooltip: bookmarked
-                      ? 'Remove bookmark'
-                      : 'Bookmark this page',
-                  icon: Icon(
-                    bookmarked ? Icons.bookmark : Icons.bookmark_border,
-                  ),
-                  onPressed: _toggleBookmark,
-                ),
-                if (_isPdf)
-                  IconButton(
-                    tooltip: _ink.enabled ? 'Stop writing' : 'Write with pen',
-                    isSelected: _ink.enabled,
-                    icon: const Icon(Icons.draw_outlined),
-                    selectedIcon: const Icon(Icons.draw),
-                    onPressed: () => _ink.enabled = !_ink.enabled,
-                  ),
-                IconButton(
-                  tooltip: 'Notes and highlights',
-                  icon: const Icon(Icons.sticky_note_2_outlined),
-                  onPressed: _showNotes,
-                ),
-              ],
-              IconButton(
-                tooltip: 'Appearance',
-                icon: const Icon(Icons.text_format),
-                onPressed: _showAppearance,
+              const SizedBox(width: 12),
+              FloatingPill(
+                paper: paper,
+                padding: const EdgeInsets.all(4),
+                child: _ready
+                    ? _DownloadButton(book: book, cache: services.cache)
+                    : const SizedBox.square(dimension: 48),
               ),
-              if (_toc.isNotEmpty)
-                Builder(
-                  builder: (context) => IconButton(
-                    tooltip: 'Contents',
-                    icon: const Icon(Icons.toc),
-                    onPressed: () => Scaffold.of(context).openEndDrawer(),
-                  ),
-                ),
             ],
           ),
         ),
@@ -526,83 +507,144 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   Widget _buildSelectionBar() {
-    return Material(
-      elevation: 6,
-      borderRadius: BorderRadius.circular(28),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (final MapEntry(key: color, value: swatch)
-                in highlightSwatches.entries)
-              IconButton(
-                tooltip: 'Highlight ${color.name}',
-                icon: Icon(Icons.circle, color: swatch),
-                onPressed: () => _highlight(color),
-              ),
-            const SizedBox(width: 4),
-            TextButton.icon(
-              icon: const Icon(Icons.edit_note),
-              label: const Text('Note'),
-              onPressed: _highlightWithNote,
-            ),
-            IconButton(
-              tooltip: 'Copy',
-              icon: const Icon(Icons.copy),
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: _selection!.text));
-                _web.clearSelection();
-                setState(() => _selection = null);
-              },
-            ),
-          ],
-        ),
+    final selection = _selection!;
+    return _chrome(
+      SelectionPopover(
+        paper: _background(),
+        onCopy: () {
+          Clipboard.setData(ClipboardData(text: selection.text));
+          _web.clearSelection();
+          setState(() => _selection = null);
+        },
+        onReadAloud: () async {
+          _web.clearSelection();
+          setState(() {
+            _selection = null;
+            _controls = true;
+          });
+          await BackgroundAudio.instance.attach(_readAloud, title: _title);
+          await _readAloud.play(
+            PassageSpeechSource(selection.text, language: _web.language),
+          );
+        },
+        onHighlight: _highlight,
+        onNote: _highlightWithNote,
       ),
     );
   }
 
   Widget _buildBottomBar() {
     final isWeb = !_isPdf;
+    final paper = _background();
+    final bookmarked = _bookmarkHere != null;
+    final percent = Text('${(_fraction * 100).round()}%');
+    final toolbar = Builder(
+      builder: (context) => ReaderToolbar(
+        paper: paper,
+        items: [
+          if (_toc.isNotEmpty)
+            ToolbarItem(
+              icon: Icons.format_list_bulleted,
+              tooltip: 'Contents',
+              onPressed: () => Scaffold.of(context).openEndDrawer(),
+            ),
+          ToolbarItem(
+            icon: bookmarked ? Icons.bookmark : Icons.bookmark_border,
+            tooltip: bookmarked ? 'Remove bookmark' : 'Bookmark this page',
+            onPressed: _toggleBookmark,
+          ),
+          ToolbarItem(
+            icon: _readAloud.active
+                ? Icons.stop_rounded
+                : Icons.headphones_outlined,
+            tooltip: _readAloud.active ? 'Stop reading aloud' : 'Read aloud',
+            selected: _readAloud.active,
+            onPressed: _toggleReadAloud,
+          ),
+          ToolbarItem(
+            icon: Icons.sticky_note_2_outlined,
+            tooltip: 'Notes and highlights',
+            onPressed: _showNotes,
+          ),
+          if (_isPdf)
+            ToolbarItem(
+              icon: _ink.enabled ? Icons.draw : Icons.draw_outlined,
+              tooltip: _ink.enabled ? 'Stop writing' : 'Write with pen',
+              selected: _ink.enabled,
+              onPressed: () => _ink.enabled = !_ink.enabled,
+            ),
+          ToolbarItem(
+            icon: Icons.light_mode_outlined,
+            tooltip: 'Appearance',
+            onPressed: _showAppearance,
+          ),
+        ],
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 200,
+              child: isWeb
+                  ? Slider(
+                      value: _fraction.clamp(0, 1),
+                      onChanged: (v) => setState(() => _fraction = v),
+                      onChangeEnd: _web.goToFraction,
+                    )
+                  : Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: LinearProgressIndicator(
+                        value: _fraction,
+                        minHeight: 4,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+            ),
+            SizedBox(width: 44, child: percent),
+          ],
+        ),
+      ),
+    );
+    Widget turn(IconData icon, String tooltip, VoidCallback onPressed) =>
+        FloatingPill(
+          paper: paper,
+          padding: const EdgeInsets.all(4),
+          child: IconButton(
+            tooltip: tooltip,
+            icon: Icon(icon),
+            onPressed: onPressed,
+          ),
+        );
     return _chrome(
       SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (_readAloud.active) _buildSpeedRow(),
+              if (_readAloud.active) ...[
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 760),
+                  child: FloatingPill(
+                    paper: paper,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    child: _buildSpeedRow(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
               Row(
                 children: [
-                  if (isWeb)
-                    IconButton(
-                      tooltip: 'Previous page',
-                      icon: const Icon(Icons.chevron_left),
-                      onPressed: _web.prev,
-                    ),
+                  if (isWeb) turn(Icons.arrow_back, 'Previous page', _web.prev),
                   Expanded(
-                    child: isWeb
-                        ? Slider(
-                            value: _fraction.clamp(0, 1),
-                            onChanged: (v) => setState(() => _fraction = v),
-                            onChangeEnd: _web.goToFraction,
-                          )
-                        : LinearProgressIndicator(value: _fraction),
-                  ),
-                  if (isWeb)
-                    IconButton(
-                      tooltip: 'Next page',
-                      icon: const Icon(Icons.chevron_right),
-                      onPressed: _web.next,
+                    child: Center(
+                      child: FittedBox(fit: BoxFit.scaleDown, child: toolbar),
                     ),
-                  const SizedBox(width: 8),
-                  Text(
-                    [
-                      if (_chapter.isNotEmpty) _chapter,
-                      '${(_fraction * 100).round()}%',
-                    ].join(' · '),
                   ),
+                  if (isWeb) turn(Icons.arrow_forward, 'Next page', _web.next),
                 ],
               ),
             ],

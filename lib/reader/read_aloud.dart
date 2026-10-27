@@ -218,3 +218,25 @@ List<SpeechSegment> sentencesOf(String text) {
       if (m[0]!.trim().isNotEmpty) SpeechSegment(m[0]!.trim()),
   ];
 }
+
+/// Reads one passage, such as the selected text, then stops.
+class PassageSpeechSource implements SpeechSource {
+  PassageSpeechSource(this.text, {this.language});
+
+  final String text;
+
+  @override
+  final String? language;
+
+  @override
+  Future<List<SpeechSegment>?> start() async => sentencesOf(text);
+
+  @override
+  Future<List<SpeechSegment>?> next() async => null;
+
+  @override
+  void onSegment(SpeechSegment segment) {}
+
+  @override
+  void stop() {}
+}
