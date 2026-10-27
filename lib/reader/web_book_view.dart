@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
@@ -225,15 +225,17 @@ class _WebBookViewState extends State<WebBookView> {
     }
   }
 
+  Map<String, Object?>? _style;
+
+  /// Restyles the book, but only when something it shows has changed:
+  /// restyling lays the whole chapter out again.
   void _applyStyle() {
+    final style = widget.settings.webStyle;
+    if (mapEquals(style, _style)) return;
+    _style = style;
     widget.controller._web?.callAsyncJavaScript(
       functionBody: 'window.reader.setStyle(s)',
-      arguments: {
-        's': {
-          'theme': widget.settings.theme.name,
-          'fontSize': widget.settings.fontSize,
-        },
-      },
+      arguments: {'s': widget.settings.webStyle},
     );
   }
 
@@ -337,23 +339,25 @@ class _WebBookViewState extends State<WebBookView> {
         widget.controller._web = web;
         _addHandlers(web);
       },
-      onLoadStop: (web, _) => web.callAsyncJavaScript(
-        functionBody: 'await window.reader.open(args)',
-        arguments: {
-          'args': {
-            'url': ReaderServer.bookPath,
-            'name': widget.fileName,
-            'lastLocation': widget.initialLocation,
-            'columns': widget.columns,
-            'theme': widget.settings.theme.name,
-            'fontSize': widget.settings.fontSize,
-            'annotations': [
-              for (final h in widget.highlights)
-                {'cfi': h.cfi, 'color': h.color},
-            ],
+      onLoadStop: (web, _) {
+        _style = widget.settings.webStyle;
+        web.callAsyncJavaScript(
+          functionBody: 'await window.reader.open(args)',
+          arguments: {
+            'args': {
+              'url': ReaderServer.bookPath,
+              'name': widget.fileName,
+              'lastLocation': widget.initialLocation,
+              'columns': widget.columns,
+              'style': _style,
+              'annotations': [
+                for (final h in widget.highlights)
+                  {'cfi': h.cfi, 'color': h.color},
+              ],
+            },
           },
-        },
-      ),
+        );
+      },
     );
   }
 }

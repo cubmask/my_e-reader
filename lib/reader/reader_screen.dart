@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 import '../core/book_format.dart';
+import '../core/platform_bridge.dart';
 import '../core/file_type.dart';
 import '../library/book.dart';
 import '../library/cover_store.dart' show CoverKind;
@@ -12,6 +13,7 @@ import '../notes/annotation_store.dart';
 import '../ui/breakpoints.dart';
 import '../ui/theme.dart';
 import '../ui/voice_settings.dart';
+import 'appearance_sheet.dart';
 import 'book_cache.dart';
 import 'book_search.dart';
 import 'ink_layer.dart';
@@ -97,6 +99,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
   @override
   void initState() {
     super.initState();
+    services.settings.addListener(_applyScreen);
+    _applyScreen();
     final saved = services.progress[book.driveFileId];
     _fraction = saved?.fraction ?? 0;
     _location = widget.openAt ?? saved?.location ?? '';
@@ -169,6 +173,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
   void dispose() {
     BackgroundAudio.instance.detach(_readAloud);
     _readAloud.dispose();
+    services.settings.removeListener(_applyScreen);
+    PlatformBridge.instance.setBrightness(null);
+    PlatformBridge.instance.keepScreenOn(false);
     _ink.dispose();
     _web.search.dispose();
     if (_pdfSearchUsed) _pdfSearch.dispose();
@@ -177,6 +184,31 @@ class _ReaderScreenState extends State<ReaderScreen> {
     services.progress.flush();
     annotations.flush();
     super.dispose();
+  }
+
+  double? _brightness;
+  bool? _awake;
+  late ReaderTheme _theme = services.settings.theme;
+  late bool _spread = services.settings.spread;
+
+  /// Brightness and keep-awake from the reading settings, sent only when
+  /// they change.
+  void _applyScreen() {
+    final settings = services.settings;
+    if (settings.brightness != _brightness) {
+      _brightness = settings.brightness;
+      PlatformBridge.instance.setBrightness(_brightness);
+    }
+    if (settings.keepAwake != _awake) {
+      _awake = settings.keepAwake;
+      PlatformBridge.instance.keepScreenOn(_awake!);
+    }
+    // The page colour and the two-page layout are drawn here.
+    if (settings.theme != _theme || settings.spread != _spread) {
+      _theme = settings.theme;
+      _spread = settings.spread;
+      if (mounted) setState(() {});
+    }
   }
 
   void _toggleControls() {
@@ -397,6 +429,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
       body: LayoutBuilder(
         builder: (context, box) {
           final spread =
+              services.settings.spread &&
               box.maxWidth > box.maxHeight &&
               box.maxWidth >= Breakpoints.expanded;
           return ListenableBuilder(
@@ -888,42 +921,18 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   void _showAppearance() {
-    final settings = services.settings;
     showModalBottomSheet<void>(
       context: context,
-      builder: (context) => ListenableBuilder(
-        listenable: settings,
-        builder: (context, _) => Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SegmentedButton<ReaderTheme>(
-                segments: const [
-                  ButtonSegment(value: ReaderTheme.light, label: Text('Light')),
-                  ButtonSegment(value: ReaderTheme.sepia, label: Text('Sepia')),
-                  ButtonSegment(value: ReaderTheme.dark, label: Text('Dark')),
-                ],
-                selected: {settings.theme},
-                onSelectionChanged: (s) {
-                  settings.setTheme(s.first);
-                  setState(() {});
-                },
-              ),
-              if (!_isPdf) ...[
-                const SizedBox(height: 16),
-                Text('Text size ${settings.fontSize}%'),
-                Slider(
-                  min: ReaderSettings.minFont.toDouble(),
-                  max: ReaderSettings.maxFont.toDouble(),
-                  divisions: 13,
-                  value: settings.fontSize.toDouble(),
-                  onChanged: (v) => settings.setFontSize(v.round()),
-                ),
-              ],
-            ],
-          ),
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        maxChildSize: 0.9,
+        builder: (context, scroll) => AppearanceSheet(
+          settings: services.settings,
+          reflowable: _format.engine == ReaderEngine.reflowable,
+          scroll: scroll,
         ),
       ),
     );

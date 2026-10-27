@@ -22,7 +22,10 @@ const highlightColors = {
 const annotations = new Map()
 let speaking = false
 let selectionTimer
-let style = { theme: 'light', fontSize: 100, lineHeight: 1.5 }
+let style = {
+    theme: 'light', fontSize: 100, lineHeight: 1.5, fontFamily: null,
+    justify: true, gap: '6%', flow: 'paginated',
+}
 let searchRun = 0
 
 const css = () => {
@@ -32,8 +35,21 @@ const css = () => {
     html, body { background: ${t.bg} !important; color: ${t.fg} !important;
         font-size: ${style.fontSize}% !important; }
     a:link, a:visited { color: ${t.link} !important; }
-    p, li, blockquote, dd { line-height: ${style.lineHeight}; hyphens: auto; widows: 2; }
+    p, li, blockquote, dd { line-height: ${style.lineHeight} !important; hyphens: auto; widows: 2; }
+    p, li, dd { text-align: ${style.justify ? 'justify' : 'start'} !important; }
+    ${style.fontFamily ? `body, p, li, blockquote, dd, div, span, a, em, i, b, strong {
+        font-family: ${style.fontFamily} !important; }` : ''}
     pre { white-space: pre-wrap !important; }`
+}
+
+// Applies the style to the renderer: CSS inside the book, plus the layout
+// attributes foliate-js reads.
+const applyStyle = () => {
+    document.documentElement.style.setProperty('--bg', themes[style.theme].bg)
+    if (!view) return
+    view.renderer.setAttribute('gap', style.gap)
+    view.renderer.setAttribute('flow', style.flow)
+    view.renderer.setStyles?.(css())
 }
 
 const escapeHTML = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c])
@@ -174,9 +190,9 @@ const highlightSpoken = range => {
 const initTTS = () => view.initTTS('sentence', highlightSpoken)
 
 window.reader = {
-    async open({ url, name, lastLocation, columns, theme, fontSize, annotations: annotations_ }) {
+    async open({ url, name, lastLocation, columns, style: style_, annotations: annotations_ }) {
         try {
-            style = { ...style, theme: theme ?? style.theme, fontSize: fontSize ?? style.fontSize }
+            style = { ...style, ...style_ }
             document.documentElement.style.setProperty('--bg', themes[style.theme].bg)
             const blob = await (await fetch(url)).blob()
             const book = await makeBook(blob, name)
@@ -185,8 +201,7 @@ window.reader = {
             await view.open(book)
             view.renderer.setAttribute('max-column-count', String(columns ?? 1))
             view.renderer.setAttribute('margin', '48px')
-            view.renderer.setAttribute('gap', '6%')
-            view.renderer.setStyles?.(css())
+            applyStyle()
             view.addEventListener('load', ({ detail: { doc, index } }) => {
                 doc.addEventListener('click', handleTap)
                 doc.addEventListener('keydown', handleKey)
@@ -285,8 +300,7 @@ window.reader = {
     setColumns: n => view?.renderer.setAttribute('max-column-count', String(n)),
     setStyle(next) {
         style = { ...style, ...next }
-        document.documentElement.style.setProperty('--bg', themes[style.theme].bg)
-        view?.renderer.setStyles?.(css())
+        applyStyle()
     },
 }
 
