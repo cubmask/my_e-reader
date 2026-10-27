@@ -150,8 +150,8 @@ class RoundToolButton extends StatelessWidget {
   }
 }
 
-/// The popover over selected text: copy, read aloud, highlight colours and
-/// a note.
+/// The popover over selected text: copy, look up, share, read aloud,
+/// highlight colours and a note.
 class SelectionPopover extends StatelessWidget {
   const SelectionPopover({
     super.key,
@@ -160,10 +160,14 @@ class SelectionPopover extends StatelessWidget {
     required this.onReadAloud,
     required this.onHighlight,
     required this.onNote,
+    this.onLookUp,
+    this.onShare,
   });
 
   final Color paper;
   final VoidCallback onCopy;
+  final VoidCallback? onLookUp;
+  final VoidCallback? onShare;
   final VoidCallback onReadAloud;
   final ValueChanged<HighlightColor> onHighlight;
   final VoidCallback onNote;
@@ -185,6 +189,24 @@ class SelectionPopover extends StatelessWidget {
               onPressed: onCopy,
             ),
           ),
+          if (onLookUp != null)
+            RoundToolButton(
+              ink: ink,
+              item: ToolbarItem(
+                icon: Icons.menu_book_outlined,
+                tooltip: 'Look up',
+                onPressed: onLookUp,
+              ),
+            ),
+          if (onShare != null)
+            RoundToolButton(
+              ink: ink,
+              item: ToolbarItem(
+                icon: Icons.share_outlined,
+                tooltip: 'Share',
+                onPressed: onShare,
+              ),
+            ),
           RoundToolButton(
             ink: ink,
             item: ToolbarItem(

@@ -17,6 +17,7 @@ import 'appearance_sheet.dart';
 import 'book_cache.dart';
 import 'book_search.dart';
 import 'ink_layer.dart';
+import 'lookup.dart';
 import 'pdf_book_view.dart';
 import 'pdf_highlights.dart';
 import 'progress_store.dart';
@@ -699,6 +700,29 @@ class _ReaderScreenState extends State<ReaderScreen> {
         },
         onHighlight: _highlight,
         onNote: _highlightWithNote,
+        onLookUp: () => showModalBottomSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          showDragHandle: true,
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.7,
+          ),
+          builder: (context) => LookupSheet(
+            service: services.lookup,
+            text: selection.text,
+            language: _isPdf ? null : _web.language,
+          ),
+        ),
+        onShare: PlatformBridge.instance.available
+            ? () {
+                final author = services.meta.authorOf(book);
+                PlatformBridge.instance.shareText(
+                  '“${selection.text}”\n— $_title${author.isEmpty ? '' : ', $author'}',
+                );
+                _clearSelection();
+                setState(() => _selection = null);
+              }
+            : null,
       ),
     );
   }

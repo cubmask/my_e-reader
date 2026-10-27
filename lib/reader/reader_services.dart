@@ -14,6 +14,7 @@ import '../library/new_books.dart';
 import '../notes/annotation_store.dart';
 import '../notes/ink_store.dart';
 import 'book_cache.dart';
+import 'lookup.dart';
 import 'progress_store.dart';
 import 'reader_server.dart';
 import 'reader_settings.dart';
@@ -34,7 +35,9 @@ class ReaderServices {
     required this.server,
     required this.settings,
     this.voices,
-  }) : duplicates = duplicates ?? DuplicateAlerts();
+    LookupService? lookup,
+  }) : duplicates = duplicates ?? DuplicateAlerts(),
+       lookup = lookup ?? LookupService(http.Client());
 
   final BookCache cache;
   final ProgressStore progress;
@@ -47,6 +50,9 @@ class ReaderServices {
   final DuplicateAlerts duplicates;
   final ReaderServer server;
   final ReaderSettings settings;
+
+  /// Dictionary and Wikipedia look-ups for selected text.
+  final LookupService lookup;
 
   /// Offline voices for reading aloud; the system voices when null.
   final VoiceStore? voices;
