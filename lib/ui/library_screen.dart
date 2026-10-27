@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../core/book_format.dart';
+import '../core/platform_bridge.dart';
 import '../library/book.dart';
 import '../library/book_meta_store.dart';
 import '../library/library_controller.dart';
 import '../reader/reader_services.dart';
+import 'add_books.dart';
 import 'book_cover.dart';
 import 'book_sheet.dart';
 import 'breakpoints.dart';
@@ -163,6 +165,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           ],
                         ),
                       ),
+                      if (PlatformBridge.instance.available)
+                        IconButton(
+                          tooltip: 'Add books from this device',
+                          icon: const Icon(Icons.add),
+                          onPressed: () =>
+                              pickAndAddBooks(context, widget.controller),
+                        ),
                       PopupMenuButton<_Sort>(
                         tooltip: 'Sort',
                         icon: const Icon(Icons.sort),

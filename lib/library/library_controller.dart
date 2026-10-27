@@ -5,10 +5,12 @@ import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/platform_bridge.dart';
 import '../drive/drive_auth.dart';
 import '../drive/drive_library_source.dart';
 import '../reader/reader_services.dart';
 import 'book.dart';
+import 'book_uploader.dart';
 import 'library_source.dart';
 
 enum LibraryStatus { signedOut, needsFolder, loading, ready, error }
@@ -20,8 +22,13 @@ typedef SourceFactory = LibrarySource Function(
 
 typedef ServicesFactory = Future<ReaderServices> Function(http.Client client);
 
+typedef UploaderFactory = BookUploader Function(http.Client client);
+
 LibrarySource _driveSource(http.Client client, String folderId) =>
     DriveLibrarySource(drive.DriveApi(client), rootFolderId: folderId);
+
+BookUploader _driveUploader(http.Client client) =>
+    BookUploader(drive.DriveApi(client));
 
 /// Owns sign-in, the chosen library folder and the list of books.
 class LibraryController extends ChangeNotifier {
@@ -29,6 +36,7 @@ class LibraryController extends ChangeNotifier {
     required this._auth,
     this._sourceFactory = _driveSource,
     this._servicesFactory = ReaderServices.create,
+    this._uploaderFactory = _driveUploader,
   });
 
   static const _folderKey = 'library.folderId';
@@ -36,6 +44,7 @@ class LibraryController extends ChangeNotifier {
   final DriveAuth _auth;
   final SourceFactory _sourceFactory;
   final ServicesFactory _servicesFactory;
+  final UploaderFactory _uploaderFactory;
 
   http.Client? _client;
   ReaderServices? _services;
@@ -116,6 +125,48 @@ class LibraryController extends ChangeNotifier {
     } catch (e) {
       _fail(e);
     }
+  }
+
+  /// Uploads [files] to the library folder and adds them to the list, then
+  /// deletes the device's temporary copies. Files already in the library
+  /// are not uploaded again.
+  Future<List<UploadResult>> addBooks(
+    List<IncomingFile> files, {
+    void Function(int done, int total)? onProgress,
+  }) async {
+    final client = _client;
+    final folderId = _folderId;
+    if (client == null || folderId == null) {
+      throw StateError('Sign in and choose your library folder first.');
+    }
+    final uploader = _uploaderFactory(client);
+    final results = <UploadResult>[];
+    try {
+      for (final (i, f) in files.indexed) {
+        onProgress?.call(i, files.length);
+        final result = await uploader.upload(
+          f.file,
+          f.name,
+          folderId: folderId,
+          existing: _books,
+        );
+        results.add(result);
+        if (result.book case final book? when result.skipped == null) {
+          _books = [..._books, book];
+          notifyListeners();
+        }
+      }
+    } finally {
+      for (final f in files) {
+        await f.file.delete().catchError((_) => f.file);
+      }
+    }
+    final added = [
+      for (final r in results)
+        if (r.skipped == null) r.book!,
+    ];
+    if (added.isNotEmpty) unawaited(_services?.metadata.lookUpNew(added));
+    return results;
   }
 
   /// Takes books deleted from Drive off the list without a refresh.
