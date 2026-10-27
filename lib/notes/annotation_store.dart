@@ -8,10 +8,40 @@ import '../reader/progress_store.dart' show ProgressRemote;
 
 enum HighlightColor { yellow, green, blue, pink }
 
+/// Highlighted text in a PDF: character ranges on one or more pages, such as
+/// `pdftext:12:140-260;13:0-85`. Ends are exclusive.
+@immutable
+class PdfTextLocation {
+  const PdfTextLocation(this.ranges);
+
+  final List<({int page, int start, int end})> ranges;
+
+  static const _prefix = 'pdftext:';
+
+  static PdfTextLocation? parse(String location) {
+    if (!location.startsWith(_prefix)) return null;
+    final ranges = <({int page, int start, int end})>[];
+    for (final part in location.substring(_prefix.length).split(';')) {
+      final m = RegExp(r'^(\d+):(\d+)-(\d+)$').firstMatch(part);
+      if (m == null) return null;
+      ranges.add((
+        page: int.parse(m[1]!),
+        start: int.parse(m[2]!),
+        end: int.parse(m[3]!),
+      ));
+    }
+    return ranges.isEmpty ? null : PdfTextLocation(ranges);
+  }
+
+  @override
+  String toString() =>
+      '$_prefix${ranges.map((r) => '${r.page}:${r.start}-${r.end}').join(';')}';
+}
+
 /// A highlight, a note, or a page bookmark in one book.
 ///
-/// [location] is an EPUB CFI range for highlighted text, or `page:N` for a
-/// bookmarked page in a PDF. Deleted annotations stay as tombstones so the
+/// [location] is an EPUB CFI range for highlighted text, `page:N` for a
+/// bookmarked page in a PDF, or a [PdfTextLocation] for highlighted PDF text. Deleted annotations stay as tombstones so the
 /// deletion syncs to other devices.
 @immutable
 class Annotation {
@@ -44,9 +74,10 @@ class Annotation {
   /// A bookmark marks a place without highlighted text.
   bool get isBookmark => text.isEmpty;
 
-  /// The page number of a PDF bookmark, if this is one.
-  int? get page =>
-      location.startsWith('page:') ? int.tryParse(location.substring(5)) : null;
+  /// The PDF page this bookmark or highlight is on, if it is in a PDF.
+  int? get page => location.startsWith('page:')
+      ? int.tryParse(location.substring(5))
+      : PdfTextLocation.parse(location)?.ranges.first.page;
 
   Annotation copyWith({String? note, HighlightColor? color, bool? deleted}) =>
       Annotation(
@@ -149,13 +180,31 @@ class AnnotationStore extends ChangeNotifier {
   int _counter = 0;
 
   /// Live annotations, newest first.
-  List<Annotation> get all =>
-      _all.values.where((a) => !a.deleted).toList()
-        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  ///
+  /// Kept sorted until the annotations change, as lists and the reader ask
+  /// for them on every rebuild.
+  List<Annotation> get all => _sorted ??= List.unmodifiable(
+    _all.values.where((a) => !a.deleted).toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+  );
 
   /// Live annotations of one book, in creation order.
-  List<Annotation> forBook(String bookId) =>
-      all.where((a) => a.bookId == bookId).toList().reversed.toList();
+  List<Annotation> forBook(String bookId) => _byBook.putIfAbsent(
+    bookId,
+    () => List.unmodifiable(
+      all.where((a) => a.bookId == bookId).toList().reversed,
+    ),
+  );
+
+  List<Annotation>? _sorted;
+  final _byBook = <String, List<Annotation>>{};
+
+  @override
+  void notifyListeners() {
+    _sorted = null;
+    _byBook.clear();
+    super.notifyListeners();
+  }
 
   Annotation? byLocation(String bookId, String location) => all
       .where((a) => a.bookId == bookId && a.location == location)

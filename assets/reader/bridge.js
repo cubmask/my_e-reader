@@ -22,7 +22,11 @@ const highlightColors = {
 const annotations = new Map()
 let speaking = false
 let selectionTimer
-let style = { theme: 'light', fontSize: 100, lineHeight: 1.5 }
+let style = {
+    theme: 'light', fontSize: 100, lineHeight: 1.5, fontFamily: null,
+    justify: true, gap: '6%', flow: 'paginated',
+}
+let searchRun = 0
 
 const css = () => {
     const t = themes[style.theme] ?? themes.light
@@ -31,8 +35,21 @@ const css = () => {
     html, body { background: ${t.bg} !important; color: ${t.fg} !important;
         font-size: ${style.fontSize}% !important; }
     a:link, a:visited { color: ${t.link} !important; }
-    p, li, blockquote, dd { line-height: ${style.lineHeight}; hyphens: auto; widows: 2; }
+    p, li, blockquote, dd { line-height: ${style.lineHeight} !important; hyphens: auto; widows: 2; }
+    p, li, dd { text-align: ${style.justify ? 'justify' : 'start'} !important; }
+    ${style.fontFamily ? `body, p, li, blockquote, dd, div, span, a, em, i, b, strong {
+        font-family: ${style.fontFamily} !important; }` : ''}
     pre { white-space: pre-wrap !important; }`
+}
+
+// Applies the style to the renderer: CSS inside the book, plus the layout
+// attributes foliate-js reads.
+const applyStyle = () => {
+    document.documentElement.style.setProperty('--bg', themes[style.theme].bg)
+    if (!view) return
+    view.renderer.setAttribute('gap', style.gap)
+    view.renderer.setAttribute('flow', style.flow)
+    view.renderer.setStyles?.(css())
 }
 
 const escapeHTML = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c])
@@ -173,9 +190,9 @@ const highlightSpoken = range => {
 const initTTS = () => view.initTTS('sentence', highlightSpoken)
 
 window.reader = {
-    async open({ url, name, lastLocation, columns, theme, fontSize, annotations: annotations_ }) {
+    async open({ url, name, lastLocation, columns, style: style_, annotations: annotations_ }) {
         try {
-            style = { ...style, theme: theme ?? style.theme, fontSize: fontSize ?? style.fontSize }
+            style = { ...style, ...style_ }
             document.documentElement.style.setProperty('--bg', themes[style.theme].bg)
             const blob = await (await fetch(url)).blob()
             const book = await makeBook(blob, name)
@@ -184,8 +201,7 @@ window.reader = {
             await view.open(book)
             view.renderer.setAttribute('max-column-count', String(columns ?? 1))
             view.renderer.setAttribute('margin', '48px')
-            view.renderer.setAttribute('gap', '6%')
-            view.renderer.setStyles?.(css())
+            applyStyle()
             view.addEventListener('load', ({ detail: { doc, index } }) => {
                 doc.addEventListener('click', handleTap)
                 doc.addEventListener('keydown', handleKey)
@@ -203,6 +219,10 @@ window.reader = {
                 cfi: detail.cfi ?? '',
                 fraction: detail.fraction ?? 0,
                 chapter: detail.tocItem?.label ?? '',
+                // Time left in the chapter and the book, in foliate's
+                // units of 1600 bytes, which the app calibrates.
+                timeSection: detail.time?.section ?? null,
+                timeTotal: detail.time?.total ?? null,
             }))
             await view.init({ lastLocation: lastLocation || null, showTextStart: !lastLocation })
             send('opened', {
@@ -215,6 +235,32 @@ window.reader = {
             sendCover().catch(() => {})
         } catch (e) {
             send('error', String(e?.message ?? e))
+        }
+    },
+    // Reads a whole book as HTML for conversion: every section's body, with
+    // scripts, styles and media dropped. Nothing is shown on screen.
+    async extract({ url, name }) {
+        const blob = await (await fetch(url)).blob()
+        const reader = document.createElement('foliate-view')
+        reader.style.display = 'none'
+        document.body.append(reader)
+        await reader.open(await makeBook(blob, name))
+        const { metadata, sections } = reader.book
+        const parts = []
+        for (const section of sections) {
+            if (!section.createDocument || section.linear === 'no') continue
+            const doc = await section.createDocument()
+            doc.querySelectorAll('script, style, link, img, svg, image, video, audio, iframe, object, embed')
+                .forEach(el => el.remove())
+            const body = doc.body?.innerHTML?.trim()
+            if (body) parts.push(body)
+        }
+        reader.remove()
+        return {
+            title: titleOf(metadata),
+            author: authorOf(metadata),
+            language: languageOf(metadata),
+            html: parts.join('\n<div style="page-break-before: always"></div>\n'),
         }
     },
     next: () => view?.goRight(),
@@ -255,11 +301,36 @@ window.reader = {
         speaking = false
         view?.renderer.getContents().forEach(({ doc }) => doc.getSelection()?.removeAllRanges())
     },
+    // Searches the whole book, reporting matches section by section so the
+    // first ones show at once. A newer search or clearSearch() ends it.
+    // [run] tags the reports so the app can ignore an older search's.
+    async search(query, run) {
+        searchRun = run
+        try {
+            for await (const result of view.search({ query })) {
+                if (run !== searchRun) return
+                if (result === 'done') break
+                if (result.progress != null) send('searchProgress', { run, progress: result.progress })
+                if (result.subitems) send('searchResults', {
+                    run,
+                    label: result.label ?? '',
+                    items: result.subitems.map(({ cfi, excerpt }) =>
+                        ({ cfi, pre: excerpt.pre, match: excerpt.match, post: excerpt.post })),
+                })
+            }
+        } catch (e) {
+            console.warn(e)
+        }
+        if (run === searchRun) send('searchDone', { run })
+    },
+    clearSearch() {
+        searchRun = -1
+        view?.clearSearch()
+    },
     setColumns: n => view?.renderer.setAttribute('max-column-count', String(n)),
     setStyle(next) {
         style = { ...style, ...next }
-        document.documentElement.style.setProperty('--bg', themes[style.theme].bg)
-        view?.renderer.setStyles?.(css())
+        applyStyle()
     },
 }
 

@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../core/book_format.dart';
+import '../core/platform_bridge.dart';
 import '../library/book.dart';
 import '../library/book_meta_store.dart';
 import '../library/library_controller.dart';
 import '../reader/reader_services.dart';
+import 'add_books.dart';
 import 'book_cover.dart';
 import 'book_sheet.dart';
 import 'breakpoints.dart';
@@ -23,6 +25,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   String _query = '';
   BookFormat? _format;
   String? _collection;
+  String? _tag;
   bool _downloadedOnly = false;
   _Sort _sort = _Sort.recent;
 
@@ -72,11 +75,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final meta = widget.controller.services?.meta;
     final collections = meta?.collections ?? const <String>[];
     if (!collections.contains(_collection)) _collection = null;
+    final tags = meta?.tags ?? const <String>[];
+    if (!tags.contains(_tag)) _tag = null;
     final q = _query.toLowerCase();
-    bool matches(Book b) =>
-        q.isEmpty ||
-        (meta?.titleOf(b) ?? b.displayTitle).toLowerCase().contains(q) ||
-        (meta?.authorOf(b) ?? '').toLowerCase().contains(q);
+    bool matches(Book b) {
+      if (q.isEmpty) return true;
+      final m = meta?[b.driveFileId];
+      return (meta?.titleOf(b) ?? b.displayTitle).toLowerCase().contains(q) ||
+          (meta?.authorOf(b) ?? '').toLowerCase().contains(q) ||
+          (m?.series.toLowerCase().contains(q) ?? false) ||
+          (m?.tags.any((t) => t.toLowerCase().contains(q)) ?? false);
+    }
+
     final cache = widget.controller.services?.cache;
     final shown = books
         .where((b) => _format == null || b.format == _format)
@@ -85,6 +95,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
           (b) =>
               _collection == null ||
               (meta?.collectionsOf(b).contains(_collection) ?? false),
+        )
+        .where(
+          (b) =>
+              _tag == null ||
+              (meta?[b.driveFileId]?.tags.contains(_tag) ?? false),
         )
         .where(matches)
         .toList();
@@ -105,6 +120,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
         if (x.isEmpty != y.isEmpty) return x.isEmpty ? 1 : -1;
         final byAuthor = x.compareTo(y);
         return byAuthor != 0 ? byAuthor : title(a).compareTo(title(b));
+      },
+      _Sort.series => (a, b) {
+        // Books in a series come first, in series order; the rest by title.
+        final x = meta?[a.driveFileId], y = meta?[b.driveFileId];
+        final sx = x?.series.toLowerCase() ?? '';
+        final sy = y?.series.toLowerCase() ?? '';
+        if (sx.isEmpty != sy.isEmpty) return sx.isEmpty ? 1 : -1;
+        final bySeries = sx.compareTo(sy);
+        if (bySeries != 0) return bySeries;
+        final byIndex = (x?.seriesIndex ?? double.infinity).compareTo(
+          y?.seriesIndex ?? double.infinity,
+        );
+        return byIndex != 0 ? byIndex : title(a).compareTo(title(b));
       },
       _Sort.added => (a, b) => (b.modifiedTime ?? DateTime(0)).compareTo(
         a.modifiedTime ?? DateTime(0),
@@ -163,6 +191,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           ],
                         ),
                       ),
+                      if (PlatformBridge.instance.available)
+                        IconButton(
+                          tooltip: 'Add books from this device',
+                          icon: const Icon(Icons.add),
+                          onPressed: () =>
+                              pickAndAddBooks(context, widget.controller),
+                        ),
                       PopupMenuButton<_Sort>(
                         tooltip: 'Sort',
                         icon: const Icon(Icons.sort),
@@ -204,10 +239,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       selected:
                           _format == null &&
                           _collection == null &&
+                          _tag == null &&
                           !_downloadedOnly,
                       onSelected: (_) => setState(() {
                         _format = null;
                         _collection = null;
+                        _tag = null;
                         _downloadedOnly = false;
                       }),
                     ),
@@ -243,6 +280,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 setState(() => _collection = on ? name : null),
                           ),
                         ),
+                    for (final name in tags)
+                      ChoiceChip(
+                        avatar: const Icon(Icons.sell_outlined),
+                        label: Text(name),
+                        selected: _tag == name,
+                        onSelected: (on) =>
+                            setState(() => _tag = on ? name : null),
+                      ),
                     if (present.length > 1)
                       for (final f in present)
                         ChoiceChip(
@@ -326,6 +371,7 @@ enum _Sort {
   recent('Recently read'),
   title('Title'),
   author('Author'),
+  series('Series'),
   added('Recently added');
 
   const _Sort(this.label);
@@ -513,8 +559,8 @@ class LibraryBookTile extends StatelessWidget {
   }
 }
 
-/// Edits a book's title, author and collections. Opened by a long press (or
-/// right click) on its card.
+/// Edits a book's title, author, series, tags, rating and collections.
+/// Opened by a long press (or right click) on its card.
 class BookDetailsDialog extends StatefulWidget {
   const BookDetailsDialog({super.key, required this.book, required this.meta});
 
@@ -535,13 +581,39 @@ class _BookDetailsDialogState extends State<BookDetailsDialog> {
   final _newCollection = TextEditingController();
   late final _all = {...widget.meta.collections};
   late final _chosen = {...widget.meta.collectionsOf(widget.book)};
+  late final _old = widget.meta[widget.book.driveFileId];
+  late final _series = TextEditingController(text: _old?.series ?? '');
+  late final _seriesIndex = TextEditingController(
+    text: switch (_old?.seriesIndex) {
+      null => '',
+      final i when i == i.roundToDouble() => '${i.round()}',
+      final i => '$i',
+    },
+  );
+  late final _tags = [...?_old?.tags];
+  final _seriesFocus = FocusNode();
+  final _newTag = TextEditingController();
+  late int? _rating = _old?.myRating;
 
   @override
   void dispose() {
     _title.dispose();
     _author.dispose();
     _newCollection.dispose();
+    _series.dispose();
+    _seriesIndex.dispose();
+    _newTag.dispose();
+    _seriesFocus.dispose();
     super.dispose();
+  }
+
+  void _addTag() {
+    final tag = _newTag.text.trim();
+    if (tag.isEmpty) return;
+    setState(() {
+      if (!_tags.contains(tag)) _tags.add(tag);
+      _newTag.clear();
+    });
   }
 
   void _add() {
@@ -565,6 +637,12 @@ class _BookDetailsDialogState extends State<BookDetailsDialog> {
         for (final c in _all)
           if (_chosen.contains(c)) c,
       ],
+      series: _series.text,
+      seriesIndex: () => _series.text.trim().isEmpty
+          ? null
+          : double.tryParse(_seriesIndex.text.trim().replaceAll(',', '.')),
+      tags: _tags,
+      myRating: () => _rating,
     );
     if (mounted) Navigator.pop(context);
   }
@@ -588,6 +666,77 @@ class _BookDetailsDialogState extends State<BookDetailsDialog> {
               TextField(
                 controller: _author,
                 decoration: const InputDecoration(labelText: 'Author'),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: Autocomplete<String>(
+                      textEditingController: _series,
+                      focusNode: _seriesFocus,
+                      optionsBuilder: (v) => widget.meta.series.where(
+                        (s) =>
+                            v.text.isNotEmpty &&
+                            s != v.text &&
+                            s.toLowerCase().contains(v.text.toLowerCase()),
+                      ),
+                      fieldViewBuilder: (context, field, focus, _) => TextField(
+                        controller: field,
+                        focusNode: focus,
+                        decoration: const InputDecoration(labelText: 'Series'),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 72,
+                    child: TextField(
+                      controller: _seriesIndex,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(labelText: 'No.'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Text('My rating', style: Theme.of(context).textTheme.titleSmall),
+              StarRating(
+                rating: _rating,
+                onChanged: (r) => setState(() => _rating = r),
+              ),
+              const SizedBox(height: 12),
+              Text('Tags', style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final t in _tags)
+                    InputChip(
+                      label: Text(t),
+                      onDeleted: () => setState(() => _tags.remove(t)),
+                    ),
+                  for (final t in widget.meta.tags)
+                    if (!_tags.contains(t))
+                      ActionChip(
+                        avatar: const Icon(Icons.add, size: 18),
+                        label: Text(t),
+                        onPressed: () => setState(() => _tags.add(t)),
+                      ),
+                ],
+              ),
+              TextField(
+                controller: _newTag,
+                decoration: InputDecoration(
+                  labelText: 'New tag',
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.add),
+                    onPressed: _addTag,
+                  ),
+                ),
+                onSubmitted: (_) => _addTag(),
               ),
               const SizedBox(height: 20),
               Text(
@@ -635,6 +784,38 @@ class _BookDetailsDialogState extends State<BookDetailsDialog> {
           child: const Text('Cancel'),
         ),
         FilledButton(onPressed: _save, child: const Text('Save')),
+      ],
+    );
+  }
+}
+
+/// One to five stars; tapping the current rating clears it.
+class StarRating extends StatelessWidget {
+  const StarRating({super.key, required this.rating, this.onChanged});
+
+  final int? rating;
+  final ValueChanged<int?>? onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.primary;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 1; i <= 5; i++)
+          IconButton(
+            tooltip: '$i ${i == 1 ? 'star' : 'stars'}',
+            visualDensity: VisualDensity.compact,
+            icon: Icon(
+              i <= (rating ?? 0)
+                  ? Icons.star_rounded
+                  : Icons.star_border_rounded,
+              color: color,
+            ),
+            onPressed: onChanged == null
+                ? null
+                : () => onChanged!(rating == i ? null : i),
+          ),
       ],
     );
   }

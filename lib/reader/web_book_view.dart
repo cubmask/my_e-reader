@@ -1,11 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../core/book_format.dart';
+import 'book_search.dart';
 import 'read_aloud.dart';
 import 'reader_server.dart';
 import 'reader_settings.dart';
@@ -55,6 +56,9 @@ class WebBookController {
 
   Future<void> clearSelection() => _run('window.reader.clearSelection()');
 
+  /// Searches the book; matches arrive through [WebBookSearch].
+  late final search = WebBookSearch(this);
+
   Future<List<SpeechSegment>?> _tts(String fn) async {
     final result = await _web?.callAsyncJavaScript(
       functionBody: 'return await window.reader.$fn()',
@@ -97,6 +101,53 @@ class WebSpeechSource implements SpeechSource {
   void stop() => _controller._run('window.reader.ttsStop()');
 }
 
+/// Searches a web book with foliate-js, which outlines the matches.
+class WebBookSearch extends BookSearch {
+  WebBookSearch(this._controller);
+
+  final WebBookController _controller;
+  int _run = 0;
+
+  @override
+  void start(String query) {
+    final run = ++_run;
+    _controller._web?.callAsyncJavaScript(
+      functionBody: 'window.reader.search(q, run)',
+      arguments: {'q': query, 'run': run},
+    );
+  }
+
+  @override
+  void cancel() {
+    _run++;
+    _controller._run('window.reader.clearSearch()');
+  }
+
+  void _onResults(Map d) {
+    if (d['run'] != _run) return;
+    final label = '${d['label'] ?? ''}';
+    addHits([
+      for (final item in (d['items'] as List? ?? const []))
+        if (item is Map)
+          SearchHit(
+            location: '${item['cfi']}',
+            label: label,
+            pre: '${item['pre'] ?? ''}',
+            match: '${item['match'] ?? ''}',
+            post: '${item['post'] ?? ''}',
+          ),
+    ]);
+  }
+
+  void _onProgress(Map d, {bool done = false}) {
+    if (d['run'] != _run) return;
+    setProgress((d['progress'] as num?)?.toDouble(), done: done);
+  }
+
+  @override
+  Future<void> goTo(SearchHit hit) => _controller.goTo(hit.location);
+}
+
 /// A highlight to draw: its CFI and colour name.
 typedef WebHighlight = ({String cfi, String color});
 
@@ -136,7 +187,13 @@ class WebBookView extends StatefulWidget {
   /// Selected text and its CFI, or null when the selection is cleared.
   final void Function(({String cfi, String text})? selection) onSelection;
   final void Function(String cfi) onHighlightTapped;
-  final void Function(String cfi, double fraction, String chapter) onRelocate;
+  final void Function(
+    String cfi,
+    double fraction,
+    String chapter,
+    ({double section, double total})? timeLeft,
+  )
+  onRelocate;
   final void Function(String title, String author, List<TocItem> toc) onOpened;
   final void Function(String message) onError;
   final VoidCallback onToggleControls;
@@ -174,15 +231,17 @@ class _WebBookViewState extends State<WebBookView> {
     }
   }
 
+  Map<String, Object?>? _style;
+
+  /// Restyles the book, but only when something it shows has changed:
+  /// restyling lays the whole chapter out again.
   void _applyStyle() {
+    final style = widget.settings.webStyle;
+    if (mapEquals(style, _style)) return;
+    _style = style;
     widget.controller._web?.callAsyncJavaScript(
       functionBody: 'window.reader.setStyle(s)',
-      arguments: {
-        's': {
-          'theme': widget.settings.theme.name,
-          'fontSize': widget.settings.fontSize,
-        },
-      },
+      arguments: {'s': widget.settings.webStyle},
     );
   }
 
@@ -191,10 +250,14 @@ class _WebBookViewState extends State<WebBookView> {
       handlerName: 'relocate',
       callback: (args) {
         final d = args.first as Map;
+        final section = d['timeSection'], total = d['timeTotal'];
         widget.onRelocate(
           '${d['cfi']}',
           (d['fraction'] as num?)?.toDouble() ?? 0,
           '${d['chapter'] ?? ''}',
+          section is num && total is num
+              ? (section: section.toDouble(), total: total.toDouble())
+              : null,
         );
       },
     );
@@ -242,6 +305,27 @@ class _WebBookViewState extends State<WebBookView> {
         if (data is String) widget.onCover?.call(base64Decode(data));
       },
     );
+    final search = widget.controller.search;
+    web.addJavaScriptHandler(
+      handlerName: 'searchResults',
+      callback: (args) {
+        if (args.firstOrNull case final Map d) search._onResults(d);
+      },
+    );
+    web.addJavaScriptHandler(
+      handlerName: 'searchProgress',
+      callback: (args) {
+        if (args.firstOrNull case final Map d) search._onProgress(d);
+      },
+    );
+    web.addJavaScriptHandler(
+      handlerName: 'searchDone',
+      callback: (args) {
+        if (args.firstOrNull case final Map d) {
+          search._onProgress(d, done: true);
+        }
+      },
+    );
     web.addJavaScriptHandler(
       handlerName: 'toggleControls',
       callback: (_) => widget.onToggleControls(),
@@ -265,23 +349,25 @@ class _WebBookViewState extends State<WebBookView> {
         widget.controller._web = web;
         _addHandlers(web);
       },
-      onLoadStop: (web, _) => web.callAsyncJavaScript(
-        functionBody: 'await window.reader.open(args)',
-        arguments: {
-          'args': {
-            'url': ReaderServer.bookPath,
-            'name': widget.fileName,
-            'lastLocation': widget.initialLocation,
-            'columns': widget.columns,
-            'theme': widget.settings.theme.name,
-            'fontSize': widget.settings.fontSize,
-            'annotations': [
-              for (final h in widget.highlights)
-                {'cfi': h.cfi, 'color': h.color},
-            ],
+      onLoadStop: (web, _) {
+        _style = widget.settings.webStyle;
+        web.callAsyncJavaScript(
+          functionBody: 'await window.reader.open(args)',
+          arguments: {
+            'args': {
+              'url': ReaderServer.bookPath,
+              'name': widget.fileName,
+              'lastLocation': widget.initialLocation,
+              'columns': widget.columns,
+              'style': _style,
+              'annotations': [
+                for (final h in widget.highlights)
+                  {'cfi': h.cfi, 'color': h.color},
+              ],
+            },
           },
-        },
-      ),
+        );
+      },
     );
   }
 }

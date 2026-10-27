@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:ebook_reader/core/book_format.dart';
 import 'package:ebook_reader/library/book.dart';
 import 'package:ebook_reader/library/book_meta_store.dart';
+import 'package:ebook_reader/ui/book_sheet.dart' show seriesLabel;
 import 'package:flutter_test/flutter_test.dart';
 
 const _book = Book(
@@ -36,6 +37,35 @@ void main() {
     await store.fillIn('b1', title: 'Something else', author: 'Other');
     expect(store.titleOf(_book), 'Dune');
     expect(store.authorOf(_book), 'Herbert');
+  });
+
+  test('series, tags and my rating are kept and can be cleared', () async {
+    await store.set(
+      'b1',
+      series: 'Dune Chronicles ',
+      seriesIndex: () => 1,
+      tags: ['sci-fi', 'desert'],
+      myRating: () => 5,
+    );
+    await store.set('b2', series: 'Foundation', tags: ['sci-fi']);
+    expect(store.series, ['Dune Chronicles', 'Foundation']);
+    expect(store.tags, ['desert', 'sci-fi']);
+
+    final again = BookMetaStore(File('${dir.path}/library.json'), null);
+    await again.load();
+    final m = again['b1']!;
+    expect(m.series, 'Dune Chronicles');
+    expect(m.seriesIndex, 1);
+    expect(m.tags, ['sci-fi', 'desert']);
+    expect(m.myRating, 5);
+    expect(seriesLabel(m), 'Book 1 of Dune Chronicles');
+
+    // Other edits leave them alone; passing null clears them.
+    await again.set('b1', title: 'Dune');
+    expect(again['b1']!.myRating, 5);
+    await again.set('b1', myRating: () => null, seriesIndex: () => 2.5);
+    expect(again['b1']!.myRating, isNull);
+    expect(seriesLabel(again['b1']), 'Book 2.5 of Dune Chronicles');
   });
 
   test('collections can be listed, renamed and deleted', () async {

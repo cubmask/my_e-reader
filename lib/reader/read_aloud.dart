@@ -76,6 +76,57 @@ class ReadAloud extends ChangeNotifier {
   bool _repeat = false;
   Completer<void>? _resumed;
 
+  Timer? _sleepTimer;
+  Timer? _sleepTick;
+  DateTime? _sleepAt;
+  bool _sleepAtChapterEnd = false;
+
+  /// When reading will pause by itself, if a sleep timer is set.
+  DateTime? get sleepAt => _sleepAt;
+
+  /// Whether reading pauses when the chapter ends.
+  bool get sleepAtChapterEnd => _sleepAtChapterEnd;
+
+  /// Pauses reading after [after]; null turns the timer off.
+  void setSleepTimer(Duration? after) {
+    _cancelSleep();
+    if (after != null) {
+      _sleepAt = DateTime.now().add(after);
+      _sleepTimer = Timer(after, _sleep);
+      // Keeps the minutes left on screen current.
+      _sleepTick = Timer.periodic(
+        const Duration(seconds: 30),
+        (_) => notifyListeners(),
+      );
+    }
+    notifyListeners();
+  }
+
+  /// Pauses reading at the end of the current chapter (see [chapterEnded]).
+  void sleepAtEndOfChapter() {
+    _cancelSleep();
+    _sleepAtChapterEnd = true;
+    notifyListeners();
+  }
+
+  /// Tells a chapter sleep timer that reading has moved to a new chapter.
+  void chapterEnded() {
+    if (_sleepAtChapterEnd && playing) _sleep();
+  }
+
+  void _sleep() {
+    _cancelSleep();
+    pause();
+  }
+
+  void _cancelSleep() {
+    _sleepTimer?.cancel();
+    _sleepTick?.cancel();
+    _sleepTimer = _sleepTick = null;
+    _sleepAt = null;
+    _sleepAtChapterEnd = false;
+  }
+
   bool get playing => _playing && !_paused;
   bool get paused => _paused;
   bool get active => _source != null;
@@ -181,6 +232,7 @@ class ReadAloud extends ChangeNotifier {
 
   Future<void> stop() async {
     _run++;
+    _cancelSleep();
     final source = _source;
     final engine = _engine;
     _source = null;
@@ -198,6 +250,7 @@ class ReadAloud extends ChangeNotifier {
   @override
   void dispose() {
     _run++;
+    _cancelSleep();
     _resumed?.complete();
     _engine?.stop();
     super.dispose();

@@ -1,19 +1,27 @@
 import 'dart:io';
+import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../library/book.dart';
 import '../library/book_meta_store.dart';
+import '../library/book_uploader.dart';
+import '../library/converter.dart';
 import '../library/cover_store.dart';
 import '../library/duplicates.dart';
 import '../library/metadata_sources.dart';
 import '../library/metadata_updater.dart';
 import '../library/new_books.dart';
+import '../library/reading_stats.dart';
 import '../notes/annotation_store.dart';
 import '../notes/ink_store.dart';
 import 'book_cache.dart';
+import 'lookup.dart';
 import 'progress_store.dart';
 import 'reader_server.dart';
 import 'reader_settings.dart';
@@ -34,7 +42,13 @@ class ReaderServices {
     required this.server,
     required this.settings,
     this.voices,
-  }) : duplicates = duplicates ?? DuplicateAlerts();
+    LookupService? lookup,
+    ReadingStats? stats,
+    this.uploader,
+    this.converter,
+  }) : duplicates = duplicates ?? DuplicateAlerts(),
+       lookup = lookup ?? LookupService(http.Client()),
+       stats = stats ?? ReadingStats(null, null, device: 'test');
 
   final BookCache cache;
   final ProgressStore progress;
@@ -48,8 +62,35 @@ class ReaderServices {
   final ReaderServer server;
   final ReaderSettings settings;
 
+  /// Dictionary and Wikipedia look-ups for selected text.
+  final LookupService lookup;
+
+  /// Time spent reading, the daily goal and finished books.
+  final ReadingStats stats;
+
+  /// Puts new files (annotated copies, conversions) into Drive.
+  final BookUploader? uploader;
+
+  /// Converts books to other formats with Google Docs.
+  final BookConverter? converter;
+
+  /// Books the reader added to Drive, for the library to list at once.
+  final added = ValueNotifier<Book?>(null);
+
   /// Offline voices for reading aloud; the system voices when null.
   final VoiceStore? voices;
+
+  /// A random id for this device, made once.
+  static Future<String> _deviceId() async {
+    final prefs = await SharedPreferences.getInstance();
+    var id = prefs.getString('device.id');
+    if (id == null) {
+      final r = Random.secure();
+      id = List.generate(8, (_) => r.nextInt(36).toRadixString(36)).join();
+      await prefs.setString('device.id', id);
+    }
+    return id;
+  }
 
   static Future<ReaderServices> create(http.Client client) async {
     final api = drive.DriveApi(client);
@@ -96,6 +137,13 @@ class ReaderServices {
       server: ReaderServer(drive: client),
       settings: ReaderSettings(),
       voices: VoiceStore(Directory(p.join(dir.path, 'voices'))),
+      stats: ReadingStats(
+        File(p.join(dir.path, 'stats.json')),
+        DriveAppDataRemote(api, 'stats.json'),
+        device: await _deviceId(),
+      ),
+      uploader: BookUploader(api),
+      converter: BookConverter(api),
     );
     await Future.wait([
       services.progress.load(),
@@ -109,6 +157,7 @@ class ReaderServices {
       services.duplicates.load(),
       services.settings.load(),
       services.voices!.load(),
+      services.stats.load(),
     ]);
     return services;
   }

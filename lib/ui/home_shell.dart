@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../core/platform_bridge.dart';
 import '../library/library_controller.dart';
+import 'add_books.dart';
 import 'breakpoints.dart';
 import 'home_screen.dart';
 import 'library_screen.dart';
@@ -20,6 +24,37 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   int _index = 0;
+  StreamSubscription<List<IncomingFile>>? _incoming;
+
+  @override
+  void initState() {
+    super.initState();
+    // Books opened with the app or shared to it are added, then opened.
+    _incoming = PlatformBridge.instance.incoming.listen(_receive);
+  }
+
+  @override
+  void dispose() {
+    _incoming?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _receive(List<IncomingFile> files) async {
+    final controller = widget.controller;
+    // The library may still be loading when the app starts from a file.
+    if (controller.status == LibraryStatus.loading) {
+      final ready = Completer<void>();
+      void check() {
+        if (controller.status != LibraryStatus.loading) ready.complete();
+      }
+
+      controller.addListener(check);
+      await ready.future.timeout(const Duration(minutes: 1), onTimeout: () {});
+      controller.removeListener(check);
+    }
+    if (!mounted) return;
+    await addBooks(context, controller, files, open: true);
+  }
 
   static const _destinations = [
     (Icons.home_outlined, Icons.home_rounded, 'Home'),

@@ -5,6 +5,7 @@ import '../library/metadata_updater.dart';
 import '../reader/book_cache.dart';
 import 'duplicates_screen.dart';
 import 'library_screen.dart' show largeTitle;
+import 'stats_screen.dart';
 import 'voice_settings.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -26,6 +27,17 @@ class SettingsScreen extends StatelessWidget {
             title: const Text('Library folder'),
             subtitle: Text(controller.folderId ?? 'Not set'),
           ),
+          if (controller.services case final services?)
+            ListTile(
+              leading: const Icon(Icons.insights_outlined),
+              title: const Text('Reading stats and daily goal'),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) =>
+                      StatsScreen(services: services, books: controller.books),
+                ),
+              ),
+            ),
           if (controller.services?.metadata case final metadata?)
             _MetadataSection(metadata: metadata, controller: controller),
           if (controller.services != null)

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:pdfrx/pdfrx.dart';
 import '../notes/ink_store.dart';
 import 'ink_layer.dart';
 import 'pdf_errors.dart';
+import 'pdf_highlights.dart';
 import 'pdf_spread.dart';
 import 'read_aloud.dart';
 
@@ -22,6 +24,11 @@ class PdfBookView extends StatefulWidget {
     required this.onToggleControls,
     this.onStreamFailed,
     required this.bookId,
+    this.paintSearch,
+    this.highlighter,
+    this.onSelection,
+    this.onHighlightTapped,
+    this.onReady,
     required this.ink,
     required this.inkController,
   });
@@ -32,6 +39,19 @@ class PdfBookView extends StatefulWidget {
   /// A URL that answers range requests, so pages load as they are needed.
   final Uri? streamUrl;
   final String bookId;
+
+  /// Draws search matches on a page.
+  final PdfViewerPagePaintCallback? paintSearch;
+
+  /// Draws text highlights and finds the one tapped.
+  final PdfHighlighter? highlighter;
+
+  /// Selected text and its location, or null when the selection is cleared.
+  final void Function(({String location, String text})? selection)? onSelection;
+  final void Function(String location)? onHighlightTapped;
+
+  /// Called once the document has opened.
+  final void Function(PdfDocument document)? onReady;
   final InkStore ink;
   final InkController inkController;
   final PdfViewerController controller;
@@ -55,6 +75,24 @@ class PdfBookView extends StatefulWidget {
 class _PdfBookViewState extends State<PdfBookView> {
   PdfViewerController get _controller => widget.controller;
   bool _streamFailed = false;
+  Timer? _selectionTimer;
+
+  @override
+  void dispose() {
+    _selectionTimer?.cancel();
+    super.dispose();
+  }
+
+  /// Reports the selection once it has settled, as the web reader does.
+  void _selectionChanged(PdfTextSelection selection) {
+    final onSelection = widget.onSelection;
+    if (onSelection == null) return;
+    _selectionTimer?.cancel();
+    _selectionTimer = Timer(const Duration(milliseconds: 400), () async {
+      final result = await pdfSelection(selection);
+      if (mounted) onSelection(result);
+    });
+  }
 
   @override
   void didUpdateWidget(PdfBookView old) {
@@ -110,6 +148,14 @@ class _PdfBookViewState extends State<PdfBookView> {
           widget.onPageChanged(page, _controller.pageCount);
         }
       },
+      pagePaintCallbacks: [?widget.paintSearch, ?widget.highlighter?.paint],
+      textSelectionParams: PdfTextSelectionParams(
+        enabled: !widget.inkController.enabled,
+        onTextSelectionChange: _selectionChanged,
+      ),
+      // The reader shows its own popover for selected text.
+      buildContextMenu: widget.onSelection == null ? null : (_, _) => null,
+      onViewerReady: (document, _) => widget.onReady?.call(document),
       pageOverlaysBuilder: (context, rect, page) => [
         InkPageLayer(
           key: ValueKey(page.pageNumber),
@@ -121,7 +167,12 @@ class _PdfBookViewState extends State<PdfBookView> {
       ],
       onGeneralTap: (context, controller, details) {
         if (details.type != PdfViewerGeneralTapType.tap) return false;
-        widget.onToggleControls();
+        final hit = widget.highlighter?.hitTest(details.documentPosition);
+        if (hit != null) {
+          widget.onHighlightTapped?.call(hit.toString());
+        } else {
+          widget.onToggleControls();
+        }
         return true;
       },
     );

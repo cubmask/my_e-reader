@@ -124,8 +124,13 @@ class BookCache extends ChangeNotifier {
         await streamed.rename(file.path);
       } else if (!await file.exists()) {
         await _fetch(book, file, (v) {
+          // Every chunk reports progress; the library only needs to redraw
+          // when the shown percentage moves.
+          final old = _active[book.driveFileId];
           _active[book.driveFileId] = v;
-          notifyListeners();
+          if (old == null || (v * 100).floor() != (old * 100).floor()) {
+            notifyListeners();
+          }
         });
       }
       await _removeOlderVersions(downloads, book, keep: file);

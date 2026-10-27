@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -5,16 +6,23 @@ import 'package:flutter/services.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 import '../core/book_format.dart';
+import '../core/platform_bridge.dart';
 import '../core/file_type.dart';
 import '../library/book.dart';
 import '../library/cover_store.dart' show CoverKind;
+import '../library/reading_stats.dart';
 import '../notes/annotation_store.dart';
 import '../ui/breakpoints.dart';
+import '../ui/export_sheet.dart';
 import '../ui/theme.dart';
 import '../ui/voice_settings.dart';
+import 'appearance_sheet.dart';
 import 'book_cache.dart';
+import 'book_search.dart';
 import 'ink_layer.dart';
+import 'lookup.dart';
 import 'pdf_book_view.dart';
+import 'pdf_highlights.dart';
 import 'progress_store.dart';
 import 'reader_chrome.dart';
 import 'read_aloud.dart';
@@ -45,11 +53,22 @@ class ReaderScreen extends StatefulWidget {
   State<ReaderScreen> createState() => _ReaderScreenState();
 }
 
-class _ReaderScreenState extends State<ReaderScreen> {
+class _ReaderScreenState extends State<ReaderScreen>
+    with WidgetsBindingObserver {
   final _web = WebBookController();
   final _pdf = PdfViewerController();
   late final _readAloud = ReadAloud(voices: services.voices);
   final _ink = InkController();
+  late final _pdfSearch = PdfBookSearch(_pdf);
+  bool _pdfSearchUsed = false;
+  late final _pdfHighlighter = PdfHighlighter(
+    _pdf,
+    () => [
+      for (final a in annotations.forBook(book.driveFileId))
+        if (PdfTextLocation.parse(a.location) case final location?)
+          (location: location, color: highlightSwatches[a.color]!),
+    ],
+  );
   File? _file;
 
   /// Set instead of [_file] when a PDF is paged in straight from Drive.
@@ -63,6 +82,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
   double _fraction = 0;
   String _chapter = '';
   String _location = '';
+
+  /// Selected text: a CFI in a web book, a [PdfTextLocation] in a PDF.
   ({String cfi, String text})? _selection;
 
   Book get book => widget.book;
@@ -74,9 +95,34 @@ class _ReaderScreenState extends State<ReaderScreen> {
   late BookFormat _format = book.format;
   bool get _isPdf => _format == BookFormat.pdf;
 
+  BookSearch get _search {
+    if (!_isPdf) return _web.search;
+    _pdfSearchUsed = true;
+    return _pdfSearch;
+  }
+
+  late final _session = ReadingSession(services.stats, book.driveFileId);
+  Timer? _sessionTimer;
+
+  /// Estimated minutes left in the chapter, once known.
+  double? _chapterMinutes;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _session.paused = state != AppLifecycleState.resumed;
+  }
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _session.tick();
+    _sessionTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _session.tick(listening: _readAloud.playing),
+    );
+    services.settings.addListener(_applyScreen);
+    _applyScreen();
     final saved = services.progress[book.driveFileId];
     _fraction = saved?.fraction ?? 0;
     _location = widget.openAt ?? saved?.location ?? '';
@@ -147,14 +193,50 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _sessionTimer?.cancel();
+    _session
+      ..tick(listening: _readAloud.playing)
+      ..end();
+    services.stats.flush();
     BackgroundAudio.instance.detach(_readAloud);
     _readAloud.dispose();
+    services.settings.removeListener(_applyScreen);
+    PlatformBridge.instance.setBrightness(null);
+    PlatformBridge.instance.keepScreenOn(false);
     _ink.dispose();
+    _web.search.dispose();
+    if (_pdfSearchUsed) _pdfSearch.dispose();
     services.ink.flush();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     services.progress.flush();
     annotations.flush();
     super.dispose();
+  }
+
+  double? _brightness;
+  bool? _awake;
+  late ReaderTheme _theme = services.settings.theme;
+  late bool _spread = services.settings.spread;
+
+  /// Brightness and keep-awake from the reading settings, sent only when
+  /// they change.
+  void _applyScreen() {
+    final settings = services.settings;
+    if (settings.brightness != _brightness) {
+      _brightness = settings.brightness;
+      PlatformBridge.instance.setBrightness(_brightness);
+    }
+    if (settings.keepAwake != _awake) {
+      _awake = settings.keepAwake;
+      PlatformBridge.instance.keepScreenOn(_awake!);
+    }
+    // The page colour and the two-page layout are drawn here.
+    if (settings.theme != _theme || settings.spread != _spread) {
+      _theme = settings.theme;
+      _spread = settings.spread;
+      if (mounted) setState(() {});
+    }
   }
 
   void _toggleControls() {
@@ -165,6 +247,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   void _save(String location, double fraction) {
+    if (fraction >= 0.995) services.stats.markFinished(book.driveFileId);
     setState(() {
       _fraction = fraction;
       _location = location;
@@ -180,10 +263,12 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   int get _initialPdfPage =>
-      int.tryParse(_location.replaceFirst('page:', '')) ?? 1;
+      int.tryParse(_location.replaceFirst('page:', '')) ??
+      PdfTextLocation.parse(_location)?.ranges.first.page ??
+      1;
 
   Future<void> _goTo(Annotation a) async {
-    if (a.page case final page?) {
+    if (a.page case final page? when _isPdf) {
       await _pdf.goToPage(pageNumber: page);
     } else {
       await _web.goTo(a.location);
@@ -204,7 +289,21 @@ class _ReaderScreenState extends State<ReaderScreen> {
       note: note,
       color: color,
     );
-    await _web.addHighlight(selection.cfi, color.name);
+    await _drawHighlight(selection.cfi, color);
+  }
+
+  Future<void> _drawHighlight(String location, HighlightColor color) async {
+    if (_isPdf) {
+      await _clearSelection();
+      if (_pdf.isReady) _pdf.invalidate();
+    } else {
+      await _web.addHighlight(location, color.name);
+    }
+  }
+
+  Future<void> _clearSelection() async {
+    if (!_isPdf) return _web.clearSelection();
+    if (_pdf.isReady) await _pdf.textSelectionDelegate.clearTextSelection();
   }
 
   Future<void> _highlightWithNote() async {
@@ -243,13 +342,17 @@ class _ReaderScreenState extends State<ReaderScreen> {
     switch (result) {
       case _Recolor(:final color):
         await annotations.update(a.copyWith(color: color));
-        await _web.addHighlight(a.location, color.name);
+        await _drawHighlight(a.location, color);
       case _EditNote():
         final note = await _editNote(context, a.note);
         if (note != null) await annotations.update(a.copyWith(note: note));
       case _Delete():
         await annotations.remove(a);
-        if (!a.isBookmark) await _web.removeHighlight(a.location);
+        if (_isPdf) {
+          if (_pdf.isReady) _pdf.invalidate();
+        } else if (!a.isBookmark) {
+          await _web.removeHighlight(a.location);
+        }
     }
     setState(() {});
   }
@@ -263,10 +366,30 @@ class _ReaderScreenState extends State<ReaderScreen> {
         listenable: annotations,
         builder: (context, _) {
           final items = annotations.forBook(book.driveFileId);
+          final export = Align(
+            alignment: Alignment.centerRight,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: TextButton.icon(
+                icon: const Icon(Icons.ios_share),
+                label: const Text('Export'),
+                onPressed: () => showExportSheet(
+                  context,
+                  title: _title,
+                  annotations: items,
+                  services: services,
+                  pdf: _isPdf ? book : null,
+                ),
+              ),
+            ),
+          );
           return DraggableScrollableSheet(
             expand: false,
             initialChildSize: 0.6,
-            builder: (context, scroll) => items.isEmpty
+            builder: (context, scroll) =>
+                items.isEmpty &&
+                    !(_isPdf &&
+                        services.ink.pagesWithInk(book.driveFileId).isNotEmpty)
                 ? const Center(
                     child: Padding(
                       padding: EdgeInsets.all(32),
@@ -280,6 +403,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 : ListView(
                     controller: scroll,
                     children: [
+                      export,
                       for (final a in items)
                         AnnotationTile(
                           annotation: a,
@@ -295,6 +419,65 @@ class _ReaderScreenState extends State<ReaderScreen> {
         },
       ),
     );
+  }
+
+  void _showSearch() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.7,
+          maxChildSize: 0.95,
+          builder: (context, scroll) =>
+              SearchPanel(search: _search, scroll: scroll),
+        ),
+      ),
+    );
+  }
+
+  /// Follows the PDF's outline for the chapter title and time left in it.
+  void _pdfPageChanged(int page, int count) {
+    TocItem? current;
+    int? nextStart;
+    for (final item in _toc) {
+      final start = int.tryParse(item.href.substring(5));
+      if (start == null) continue;
+      if (start <= page) {
+        current = item;
+      } else if (nextStart == null || start < nextStart) {
+        nextStart = start;
+      }
+    }
+    final chapter = current?.label ?? '';
+    if (chapter != _chapter && _chapter.isNotEmpty) _readAloud.chapterEnded();
+    _chapter = chapter;
+    final pagesLeft = (nextStart ?? count + 1) - page;
+    _chapterMinutes = pagesLeft * services.stats.secondsPerPage / 60;
+  }
+
+  /// A PDF's outline becomes its contents.
+  Future<void> _loadOutline(PdfDocument document) async {
+    final outline = await document.loadOutline().catchError(
+      (_) => <PdfOutlineNode>[],
+    );
+    final toc = <TocItem>[];
+    void walk(List<PdfOutlineNode> nodes, int depth) {
+      for (final n in nodes) {
+        if (n.dest case final dest?) {
+          toc.add(TocItem(n.title.trim(), 'page:${dest.pageNumber}', depth));
+        }
+        walk(n.children, depth + 1);
+      }
+    }
+
+    walk(outline, 0);
+    if (mounted && toc.isNotEmpty) setState(() => _toc = toc);
   }
 
   // Read aloud
@@ -316,6 +499,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
       body: LayoutBuilder(
         builder: (context, box) {
           final spread =
+              services.settings.spread &&
               box.maxWidth > box.maxHeight &&
               box.maxWidth >= Breakpoints.expanded;
           return ListenableBuilder(
@@ -394,10 +578,25 @@ class _ReaderScreenState extends State<ReaderScreen> {
             _fetch();
           },
           bookId: book.driveFileId,
+          paintSearch: (_search as PdfBookSearch).paint,
+          highlighter: _pdfHighlighter,
+          onSelection: (selection) => setState(
+            () => _selection = selection == null
+                ? null
+                : (cfi: selection.location, text: selection.text),
+          ),
+          onHighlightTapped: (location) {
+            final a = annotations.byLocation(book.driveFileId, location);
+            if (a != null) _openAnnotation(a);
+          },
+          onReady: _loadOutline,
           ink: services.ink,
           inkController: _ink,
-          onPageChanged: (page, count) =>
-              _save('page:$page', count <= 1 ? 1 : (page - 1) / (count - 1)),
+          onPageChanged: (page, count) {
+            _session.activity(page: page);
+            _pdfPageChanged(page, count);
+            _save('page:$page', count <= 1 ? 1 : (page - 1) / (count - 1));
+          },
         ),
       );
     }
@@ -439,8 +638,17 @@ class _ReaderScreenState extends State<ReaderScreen> {
           for (final a in annotations.forBook(book.driveFileId))
             if (!a.isBookmark) (cfi: a.location, color: a.color.name),
         ],
-        onRelocate: (cfi, fraction, chapter) {
+        onRelocate: (cfi, fraction, chapter, timeLeft) {
+          if (chapter != _chapter && _chapter.isNotEmpty) {
+            _readAloud.chapterEnded();
+          }
           _chapter = chapter;
+          if (timeLeft != null) {
+            _session.activity(unitsLeft: timeLeft.total);
+            _chapterMinutes = timeLeft.section * services.stats.minutesPerUnit;
+          } else {
+            _session.activity();
+          }
           _save(cfi, fraction);
         },
         onSelection: (selection) => setState(() => _selection = selection),
@@ -518,9 +726,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
                           style: Theme.of(context).textTheme.titleMedium
                               ?.copyWith(fontFamily: AppFonts.serif),
                         ),
-                        if (_chapter.isNotEmpty)
+                        if (_chapterLine() case final line?)
                           Text(
-                            _chapter,
+                            line,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.bodySmall
@@ -550,6 +758,17 @@ class _ReaderScreenState extends State<ReaderScreen> {
     );
   }
 
+  /// The chapter and the time left in it, such as "Chapter 3 · 12 min
+  /// left in chapter".
+  String? _chapterLine() {
+    final minutes = _chapterMinutes;
+    final left = minutes == null
+        ? null
+        : '${formatMinutes(minutes)} left in ${_chapter.isEmpty ? 'section' : 'chapter'}';
+    final parts = [if (_chapter.isNotEmpty) _chapter, ?left];
+    return parts.isEmpty ? null : parts.join(' · ');
+  }
+
   Widget _buildSelectionBar() {
     final selection = _selection!;
     return _chrome(
@@ -557,11 +776,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
         paper: _background(),
         onCopy: () {
           Clipboard.setData(ClipboardData(text: selection.text));
-          _web.clearSelection();
+          _clearSelection();
           setState(() => _selection = null);
         },
         onReadAloud: () async {
-          _web.clearSelection();
+          _clearSelection();
           setState(() {
             _selection = null;
             _controls = true;
@@ -573,6 +792,29 @@ class _ReaderScreenState extends State<ReaderScreen> {
         },
         onHighlight: _highlight,
         onNote: _highlightWithNote,
+        onLookUp: () => showModalBottomSheet<void>(
+          context: context,
+          isScrollControlled: true,
+          showDragHandle: true,
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(context).height * 0.7,
+          ),
+          builder: (context) => LookupSheet(
+            service: services.lookup,
+            text: selection.text,
+            language: _isPdf ? null : _web.language,
+          ),
+        ),
+        onShare: PlatformBridge.instance.available
+            ? () {
+                final author = services.meta.authorOf(book);
+                PlatformBridge.instance.shareText(
+                  '“${selection.text}”\n— $_title${author.isEmpty ? '' : ', $author'}',
+                );
+                _clearSelection();
+                setState(() => _selection = null);
+              }
+            : null,
       ),
     );
   }
@@ -592,6 +834,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
               tooltip: 'Contents',
               onPressed: () => Scaffold.of(context).openEndDrawer(),
             ),
+          ToolbarItem(
+            icon: Icons.search,
+            tooltip: 'Search this book',
+            onPressed: _showSearch,
+          ),
           ToolbarItem(
             icon: bookmarked ? Icons.bookmark : Icons.bookmark_border,
             tooltip: bookmarked ? 'Remove bookmark' : 'Bookmark this page',
@@ -628,20 +875,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
           children: [
             SizedBox(
               width: 200,
-              child: isWeb
-                  ? Slider(
-                      value: _fraction.clamp(0, 1),
-                      onChanged: (v) => setState(() => _fraction = v),
-                      onChangeEnd: _web.goToFraction,
-                    )
-                  : Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: LinearProgressIndicator(
-                        value: _fraction,
-                        minHeight: 4,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
+              child: Slider(
+                value: _fraction.clamp(0, 1),
+                onChanged: (v) => setState(() => _fraction = v),
+                onChangeEnd: isWeb ? _web.goToFraction : _goToPdfFraction,
+              ),
             ),
             SizedBox(width: 44, child: percent),
           ],
@@ -698,6 +936,12 @@ class _ReaderScreenState extends State<ReaderScreen> {
     );
   }
 
+  void _goToPdfFraction(double fraction) {
+    if (!_pdf.isReady) return;
+    final count = _pdf.pageCount;
+    _pdf.goToPage(pageNumber: (fraction * (count - 1)).round() + 1);
+  }
+
   /// Which voice is reading, such as "German · Supertonic 3".
   String _voiceLabel() {
     final language = _readAloud.language;
@@ -743,6 +987,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
           ),
         ),
         const Spacer(),
+        _SleepButton(readAloud: _readAloud, byChapter: !_isPdf),
+        const SizedBox(width: 8),
         SegmentedButton<double>(
           showSelectedIcon: false,
           segments: [
@@ -776,7 +1022,14 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 title: Text(item.label),
                 onTap: () {
                   Navigator.of(context).pop();
-                  _web.goTo(item.href);
+                  final page = item.href.startsWith('page:')
+                      ? int.tryParse(item.href.substring(5))
+                      : null;
+                  if (page != null) {
+                    _pdf.goToPage(pageNumber: page);
+                  } else {
+                    _web.goTo(item.href);
+                  }
                 },
               ),
           ],
@@ -786,42 +1039,18 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   void _showAppearance() {
-    final settings = services.settings;
     showModalBottomSheet<void>(
       context: context,
-      builder: (context) => ListenableBuilder(
-        listenable: settings,
-        builder: (context, _) => Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SegmentedButton<ReaderTheme>(
-                segments: const [
-                  ButtonSegment(value: ReaderTheme.light, label: Text('Light')),
-                  ButtonSegment(value: ReaderTheme.sepia, label: Text('Sepia')),
-                  ButtonSegment(value: ReaderTheme.dark, label: Text('Dark')),
-                ],
-                selected: {settings.theme},
-                onSelectionChanged: (s) {
-                  settings.setTheme(s.first);
-                  setState(() {});
-                },
-              ),
-              if (!_isPdf) ...[
-                const SizedBox(height: 16),
-                Text('Text size ${settings.fontSize}%'),
-                Slider(
-                  min: ReaderSettings.minFont.toDouble(),
-                  max: ReaderSettings.maxFont.toDouble(),
-                  divisions: 13,
-                  value: settings.fontSize.toDouble(),
-                  onChanged: (v) => settings.setFontSize(v.round()),
-                ),
-              ],
-            ],
-          ),
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        maxChildSize: 0.9,
+        builder: (context, scroll) => AppearanceSheet(
+          settings: services.settings,
+          reflowable: _format.engine == ReaderEngine.reflowable,
+          scroll: scroll,
         ),
       ),
     );
@@ -987,6 +1216,66 @@ class _Notice extends StatelessWidget {
       child: Text(text, textAlign: TextAlign.center),
     ),
   );
+}
+
+/// Sets the read-aloud sleep timer, showing the minutes left while it runs.
+class _SleepButton extends StatelessWidget {
+  const _SleepButton({required this.readAloud, required this.byChapter});
+
+  final ReadAloud readAloud;
+
+  /// Whether "End of chapter" is offered; PDFs have no chapters to follow.
+  final bool byChapter;
+
+  static const _minutes = [5, 10, 15, 30, 45, 60];
+
+  @override
+  Widget build(BuildContext context) {
+    final at = readAloud.sleepAt;
+    final left = at == null
+        ? null
+        : (at.difference(DateTime.now()).inSeconds / 60).ceil().clamp(1, 999);
+    final on = at != null || readAloud.sleepAtChapterEnd;
+    return PopupMenuButton<int>(
+      tooltip: 'Sleep timer',
+      onSelected: (v) => switch (v) {
+        0 => readAloud.setSleepTimer(null),
+        -1 => readAloud.sleepAtEndOfChapter(),
+        _ => readAloud.setSleepTimer(Duration(minutes: v)),
+      },
+      itemBuilder: (_) => [
+        if (on) const PopupMenuItem(value: 0, child: Text('Off')),
+        for (final m in _minutes)
+          PopupMenuItem(value: m, child: Text('$m minutes')),
+        if (byChapter)
+          PopupMenuItem(
+            value: -1,
+            enabled: !readAloud.sleepAtChapterEnd,
+            child: const Text('End of chapter'),
+          ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              on ? Icons.bedtime : Icons.bedtime_outlined,
+              size: 22,
+              color: on ? Theme.of(context).colorScheme.primary : null,
+            ),
+            if (left != null) ...[
+              const SizedBox(width: 4),
+              Text('$left min'),
+            ] else if (readAloud.sleepAtChapterEnd) ...[
+              const SizedBox(width: 4),
+              const Text('Chapter'),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// Keeps the book on the device for offline reading, or frees the space.

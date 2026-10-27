@@ -156,6 +156,18 @@ void main() {
       expect(find.text('Duplicates found'), findsNothing);
     });
 
+    testWidgets('Home opens reading stats on a $name', (tester) async {
+      final controller = await signedIn(tester);
+      controller.services!.stats.addReading('d4', 12 * 60);
+      await pumpApp(tester, controller, size);
+      expect(find.text('Today 12 of 30 min'), findsOneWidget);
+      await tester.tap(find.text('Today 12 of 30 min'));
+      await tester.pumpAndSettle();
+      expect(find.text('18 min to go today'), findsOneWidget);
+      expect(find.text('Last two weeks'), findsOneWidget);
+      await controller.services!.stats.flush();
+    });
+
     testWidgets('Home highlights books new in Drive on a $name', (
       tester,
     ) async {
