@@ -8,9 +8,9 @@ const send = (name, data) =>
     window.flutter_inappwebview?.callHandler(name, data)
 
 const themes = {
-    light: { bg: '#ffffff', fg: '#1b1b1b', link: '#1a5fb4' },
+    light: { bg: '#fbf9f4', fg: '#23262d', link: '#b2443f' },
     sepia: { bg: '#f4ecd8', fg: '#433422', link: '#7b4a12' },
-    dark: { bg: '#121212', fg: '#e3e3e3', link: '#8ab4f8' },
+    dark: { bg: '#1b1a18', fg: '#e6e1d8', link: '#e8857f' },
 }
 
 let view = null

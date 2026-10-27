@@ -206,4 +206,16 @@ void main() {
     expect(source.stopped, isTrue);
     expect(reader.active, isFalse);
   });
+
+  test('reads a selected passage once, then stops', () async {
+    final engine = _FakeEngine();
+    final voices = _FakeVoices(engine);
+    final reader = ReadAloud(voices: voices);
+    await reader.play(
+      PassageSpeechSource('Call me Ishmael. Some years ago', language: 'en'),
+    );
+    expect(engine.spoken, ['Call me Ishmael.', 'Some years ago']);
+    expect(voices.declared, 'en');
+    expect(reader.active, isFalse);
+  });
 }

@@ -139,13 +139,20 @@ void main() {
     testWidgets('Home shows the book in progress on a $name', (tester) async {
       final controller = await signedIn(tester);
       await pumpApp(tester, controller, size);
-      expect(find.text('CONTINUE READING'), findsOneWidget);
+      expect(find.text('Happy reading'), findsOneWidget);
+      expect(find.text('Continue reading'), findsOneWidget);
       // Piranesi was read most recently.
       expect(find.text('Piranesi'), findsWidgets);
       expect(find.text('Recent'), findsOneWidget);
+      // On a phone the last shelf is further down.
+      await tester.scrollUntilVisible(
+        find.text('Not started yet'),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(find.text('Not started yet'), findsOneWidget);
       // Nothing arrived in Drive lately, so there is no hero.
-      expect(find.textContaining('NEW IN YOUR DRIVE'), findsNothing);
+      expect(find.text('New in your Drive'), findsNothing);
       expect(find.text('Duplicates found'), findsNothing);
     });
 
@@ -161,12 +168,12 @@ void main() {
       );
       final controller = await signedIn(tester, library: [...books, added]);
       await pumpApp(tester, controller, size);
-      expect(find.text('NEW IN YOUR DRIVE'), findsOneWidget);
+      expect(find.text('New in your Drive'), findsOneWidget);
       expect(find.text('The Ministry of Time'), findsWidgets);
 
       await tester.tap(find.text('Dismiss'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('NEW IN YOUR DRIVE'), findsNothing);
+      expect(find.text('New in your Drive'), findsNothing);
     });
 
     testWidgets('Duplicates are deleted after confirming on a $name', (
@@ -185,7 +192,7 @@ void main() {
         library: [...books, copy('c1', 1), copy('c2', 9)],
       );
       await pumpApp(tester, controller, size);
-      await tester.tap(find.text('Library').first);
+      await tester.tap(find.byTooltip('Library'));
       await tester.pump();
       // On a phone the chip is further along the scrolling row.
       await tester.ensureVisible(find.text('Duplicates · 1'));
@@ -250,7 +257,7 @@ void main() {
     testWidgets('Library lists every book on a $name', (tester) async {
       final controller = await signedIn(tester);
       await pumpApp(tester, controller, size);
-      await tester.tap(find.text('Library').first);
+      await tester.tap(find.byTooltip('Library'));
       await tester.pump();
       expect(find.text('All · 7'), findsOneWidget);
       expect(find.text('34%'), findsOneWidget);
@@ -259,8 +266,8 @@ void main() {
       // The "more" button opens the book's details.
       await tester.tap(find.byTooltip('More').first);
       await tester.pumpAndSettle();
-      expect(find.text('Continue'), findsOneWidget);
-      expect(find.text('Download'), findsOneWidget);
+      expect(find.text('Continue reading'), findsOneWidget);
+      expect(find.byTooltip('Download'), findsOneWidget);
     });
   }
 }
