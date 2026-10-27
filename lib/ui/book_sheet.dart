@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 
 import '../library/book.dart';
 import '../library/book_meta_store.dart';
+import '../library/converter.dart' show ConvertTarget;
 import '../library/metadata_sources.dart';
 import '../reader/reader_screen.dart';
 import '../reader/reader_services.dart';
 import 'book_cover.dart';
 import 'breakpoints.dart';
+import 'convert_dialog.dart';
 import 'delete_books.dart';
 import 'library_screen.dart' show BookDetailsDialog;
 import 'theme.dart';
@@ -345,6 +347,13 @@ class _Actions extends StatelessWidget {
             builder: (_) => MetadataPicker(book: book, services: services),
           ),
         ),
+        if (services.converter != null &&
+            ConvertTarget.forFormat(book.format).isNotEmpty)
+          CircleIconButton(
+            tooltip: 'Convert to another format',
+            icon: const Icon(Icons.transform),
+            onPressed: () => showConvertDialog(context, book, services),
+          ),
         CircleIconButton(
           tooltip: 'Edit title, author and collections',
           icon: const Icon(Icons.edit_outlined),

@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../library/book.dart';
 import '../library/book_meta_store.dart';
 import '../library/book_uploader.dart';
+import '../library/converter.dart';
 import '../library/cover_store.dart';
 import '../library/duplicates.dart';
 import '../library/metadata_sources.dart';
@@ -44,6 +45,7 @@ class ReaderServices {
     LookupService? lookup,
     ReadingStats? stats,
     this.uploader,
+    this.converter,
   }) : duplicates = duplicates ?? DuplicateAlerts(),
        lookup = lookup ?? LookupService(http.Client()),
        stats = stats ?? ReadingStats(null, null, device: 'test');
@@ -68,6 +70,9 @@ class ReaderServices {
 
   /// Puts new files (annotated copies, conversions) into Drive.
   final BookUploader? uploader;
+
+  /// Converts books to other formats with Google Docs.
+  final BookConverter? converter;
 
   /// Books the reader added to Drive, for the library to list at once.
   final added = ValueNotifier<Book?>(null);
@@ -138,6 +143,7 @@ class ReaderServices {
         device: await _deviceId(),
       ),
       uploader: BookUploader(api),
+      converter: BookConverter(api),
     );
     await Future.wait([
       services.progress.load(),

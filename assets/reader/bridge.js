@@ -237,6 +237,32 @@ window.reader = {
             send('error', String(e?.message ?? e))
         }
     },
+    // Reads a whole book as HTML for conversion: every section's body, with
+    // scripts, styles and media dropped. Nothing is shown on screen.
+    async extract({ url, name }) {
+        const blob = await (await fetch(url)).blob()
+        const reader = document.createElement('foliate-view')
+        reader.style.display = 'none'
+        document.body.append(reader)
+        await reader.open(await makeBook(blob, name))
+        const { metadata, sections } = reader.book
+        const parts = []
+        for (const section of sections) {
+            if (!section.createDocument || section.linear === 'no') continue
+            const doc = await section.createDocument()
+            doc.querySelectorAll('script, style, link, img, svg, image, video, audio, iframe, object, embed')
+                .forEach(el => el.remove())
+            const body = doc.body?.innerHTML?.trim()
+            if (body) parts.push(body)
+        }
+        reader.remove()
+        return {
+            title: titleOf(metadata),
+            author: authorOf(metadata),
+            language: languageOf(metadata),
+            html: parts.join('\n<div style="page-break-before: always"></div>\n'),
+        }
+    },
     next: () => view?.goRight(),
     prev: () => view?.goLeft(),
     goTo: target => view?.goTo(target),
