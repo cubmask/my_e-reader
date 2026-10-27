@@ -29,7 +29,7 @@ The latest round filled the biggest gaps:
 - **Reading settings:** font, line spacing, margins, justification, scrolled or paged layout, single or two-page spreads, a brightness slider and keep-screen-on.
 - **Look up** selected text: a dictionary definition (English, from dictionaryapi.dev), a Wikipedia summary, Google Translate, or a web search. Selected text can also be shared as a quote.
 - **Add books from the tablet** with the + button in the Library, or by opening or sharing a file into the app. They upload to the Drive folder, and copies already there are skipped.
-- **Sleep timer** for read aloud: after 15, 30, 45 or 60 minutes, or at the end of the chapter.
+- **Sleep timer** for read aloud: after 5 to 60 minutes, or at the end of the chapter.
 - **Series, tags and your own star rating** in a book's details, with a Series sort, tag filters and search over both.
 - **Reading stats:** time read per day and per book, a daily goal, books finished this year and a streak, plus "12 min left in chapter" in the reader. Stats sync through a hidden `stats.json`.
 - **Export notes** as Markdown (copy, share or save), and for PDFs with handwriting, a copy of the PDF with the ink drawn on, shared or saved to Drive next to the book. Pages with ink become pictures in that copy; the rest keep their text.
