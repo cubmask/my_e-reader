@@ -67,6 +67,7 @@ class LibraryController extends ChangeNotifier {
       final client = _client = await _auth.signIn();
       _services = await _servicesFactory(client);
       _services!.cache.addListener(_dropDeleted);
+      _services!.added.addListener(_addFromReader);
       final prefs = await SharedPreferences.getInstance();
       _folderId = prefs.getString(_folderKey);
       if (_folderId == null) {
@@ -84,6 +85,7 @@ class LibraryController extends ChangeNotifier {
     await _services?.progress.flush();
     await _services?.meta.flush();
     _services?.cache.removeListener(_dropDeleted);
+    _services?.added.removeListener(_addFromReader);
     _client = null;
     _services = null;
     _books = const [];
@@ -167,6 +169,16 @@ class LibraryController extends ChangeNotifier {
     ];
     if (added.isNotEmpty) unawaited(_services?.metadata.lookUpNew(added));
     return results;
+  }
+
+  /// Lists a book the reader put in Drive, such as an annotated copy.
+  void _addFromReader() {
+    final book = _services?.added.value;
+    if (book == null || _books.any((b) => b.driveFileId == book.driveFileId)) {
+      return;
+    }
+    _books = [..._books, book];
+    notifyListeners();
   }
 
   /// Takes books deleted from Drive off the list without a refresh.

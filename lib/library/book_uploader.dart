@@ -63,6 +63,35 @@ class BookUploader {
       skipped: null,
     );
   }
+
+  /// Uploads [file] as [name] into the folder that holds [originalId], such
+  /// as an annotated copy or a conversion of that book.
+  Future<Book> uploadNextTo(String originalId, File file, String name) async {
+    final original = await _api.files.get(
+      originalId,
+      $fields: 'parents',
+      supportsAllDrives: true,
+    ) as drive.File;
+    final folder = original.parents?.firstOrNull;
+    if (folder == null) throw StateError('The book has no folder in Drive.');
+    final length = await file.length();
+    final created = await _api.files.create(
+      drive.File(name: name, parents: [folder]),
+      uploadMedia: drive.Media(file.openRead(), length),
+      uploadOptions: drive.UploadOptions.resumable,
+      $fields: 'id, name, size, modifiedTime, createdTime, md5Checksum',
+    );
+    return Book(
+      driveFileId: created.id!,
+      fileName: created.name ?? name,
+      format: BookFormat.fromFileName(created.name ?? name)!,
+      folderPath: '',
+      sizeBytes: int.tryParse(created.size ?? '') ?? length,
+      modifiedTime: created.modifiedTime,
+      createdTime: created.createdTime,
+      md5: created.md5Checksum,
+    );
+  }
 }
 
 /// The name to store [file] under: [name] when it is a book's, else [name]

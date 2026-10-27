@@ -1,13 +1,16 @@
 import 'dart:io';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../library/book.dart';
 import '../library/book_meta_store.dart';
+import '../library/book_uploader.dart';
 import '../library/cover_store.dart';
 import '../library/duplicates.dart';
 import '../library/metadata_sources.dart';
@@ -40,6 +43,7 @@ class ReaderServices {
     this.voices,
     LookupService? lookup,
     ReadingStats? stats,
+    this.uploader,
   }) : duplicates = duplicates ?? DuplicateAlerts(),
        lookup = lookup ?? LookupService(http.Client()),
        stats = stats ?? ReadingStats(null, null, device: 'test');
@@ -61,6 +65,12 @@ class ReaderServices {
 
   /// Time spent reading, the daily goal and finished books.
   final ReadingStats stats;
+
+  /// Puts new files (annotated copies, conversions) into Drive.
+  final BookUploader? uploader;
+
+  /// Books the reader added to Drive, for the library to list at once.
+  final added = ValueNotifier<Book?>(null);
 
   /// Offline voices for reading aloud; the system voices when null.
   final VoiceStore? voices;
@@ -127,6 +137,7 @@ class ReaderServices {
         DriveAppDataRemote(api, 'stats.json'),
         device: await _deviceId(),
       ),
+      uploader: BookUploader(api),
     );
     await Future.wait([
       services.progress.load(),

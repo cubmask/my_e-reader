@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../library/library_controller.dart';
 import '../notes/annotation_store.dart';
 import '../reader/reader_screen.dart';
+import 'export_sheet.dart';
 import 'library_screen.dart' show largeTitle;
 
 /// Every highlight, note and bookmark across the library.
@@ -52,22 +52,16 @@ class _NotesScreenState extends State<NotesScreen> {
                     Text('${items.length}'),
                     const Spacer(),
                     IconButton(
-                      tooltip: 'Copy as Markdown',
-                      icon: const Icon(Icons.copy_all),
+                      tooltip: 'Export notes',
+                      icon: const Icon(Icons.ios_share),
                       onPressed: items.isEmpty
                           ? null
-                          : () {
-                              Clipboard.setData(
-                                ClipboardData(
-                                  text: annotationsToMarkdown(items),
-                                ),
-                              );
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Copied as Markdown'),
-                                ),
-                              );
-                            },
+                          : () => showExportSheet(
+                              context,
+                              title: _query.isEmpty ? 'All' : _query,
+                              annotations: items,
+                              services: services,
+                            ),
                     ),
                     const SizedBox(width: 8),
                     SizedBox(

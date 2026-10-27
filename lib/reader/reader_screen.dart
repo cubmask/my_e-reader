@@ -13,6 +13,7 @@ import '../library/cover_store.dart' show CoverKind;
 import '../library/reading_stats.dart';
 import '../notes/annotation_store.dart';
 import '../ui/breakpoints.dart';
+import '../ui/export_sheet.dart';
 import '../ui/theme.dart';
 import '../ui/voice_settings.dart';
 import 'appearance_sheet.dart';
@@ -365,10 +366,30 @@ class _ReaderScreenState extends State<ReaderScreen>
         listenable: annotations,
         builder: (context, _) {
           final items = annotations.forBook(book.driveFileId);
+          final export = Align(
+            alignment: Alignment.centerRight,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: TextButton.icon(
+                icon: const Icon(Icons.ios_share),
+                label: const Text('Export'),
+                onPressed: () => showExportSheet(
+                  context,
+                  title: _title,
+                  annotations: items,
+                  services: services,
+                  pdf: _isPdf ? book : null,
+                ),
+              ),
+            ),
+          );
           return DraggableScrollableSheet(
             expand: false,
             initialChildSize: 0.6,
-            builder: (context, scroll) => items.isEmpty
+            builder: (context, scroll) =>
+                items.isEmpty &&
+                    !(_isPdf &&
+                        services.ink.pagesWithInk(book.driveFileId).isNotEmpty)
                 ? const Center(
                     child: Padding(
                       padding: EdgeInsets.all(32),
@@ -382,6 +403,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                 : ListView(
                     controller: scroll,
                     children: [
+                      export,
                       for (final a in items)
                         AnnotationTile(
                           annotation: a,
