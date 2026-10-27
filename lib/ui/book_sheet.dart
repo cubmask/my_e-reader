@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../library/book.dart';
+import '../library/book_meta_store.dart';
 import '../library/metadata_sources.dart';
 import '../reader/reader_screen.dart';
 import '../reader/reader_services.dart';
@@ -246,11 +247,22 @@ class _Heading extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final author = services.meta.authorOf(book);
-    final subjects = services.meta[book.driveFileId]?.subjects ?? const [];
+    final m = services.meta[book.driveFileId];
+    final subjects = m?.subjects ?? const [];
+    final series = seriesLabel(m);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(services.meta.titleOf(book), style: theme.textTheme.displaySmall),
+        if (series != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            series,
+            style: theme.textTheme.titleSmall?.copyWith(
+              color: theme.colorScheme.primary,
+            ),
+          ),
+        ],
         if (author.isNotEmpty) ...[
           const SizedBox(height: 16),
           Text(
@@ -486,7 +498,9 @@ class _Facts extends StatelessWidget {
         ('Published', m.published),
       if (m?.pageCount != null) ('Length', '${m!.pageCount} pages'),
       if (m != null && m.isbn.isNotEmpty) ('ISBN', m.isbn),
+      if (m?.myRating != null) ('My rating', '★' * m!.myRating!),
       if (m?.rating != null) ('Rating', '${m!.rating!.toStringAsFixed(1)} / 5'),
+      if (m != null && m.tags.isNotEmpty) ('Tags', m.tags.join(', ')),
       (
         'File',
         [
@@ -705,4 +719,13 @@ class _MetadataPickerState extends State<MetadataPicker> {
       ],
     );
   }
+}
+
+/// "Book 2 of Foundation", or "Foundation" when the number is unknown.
+String? seriesLabel(BookMeta? meta) {
+  if (meta == null || meta.series.isEmpty) return null;
+  final index = meta.seriesIndex;
+  if (index == null) return meta.series;
+  final n = index == index.roundToDouble() ? '${index.round()}' : '$index';
+  return 'Book $n of ${meta.series}';
 }
