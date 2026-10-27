@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../library/library_controller.dart';
 import '../library/metadata_updater.dart';
 import '../reader/book_cache.dart';
+import 'book_health_screen.dart';
 import 'duplicates_screen.dart';
 import 'library_screen.dart' show largeTitle;
 import 'stats_screen.dart';
@@ -52,6 +53,20 @@ class SettingsScreen extends StatelessWidget {
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute<void>(
                   builder: (_) => DuplicatesScreen(controller: controller),
+                ),
+              ),
+            ),
+          if (controller.services?.health case final health?)
+            ListenableBuilder(
+              listenable: health,
+              builder: (context, _) => ListTile(
+                leading: const Icon(Icons.report_problem_outlined),
+                title: const Text('Books that won\'t open'),
+                subtitle: Text(bookHealthSummary(controller)),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => BookHealthScreen(controller: controller),
+                  ),
                 ),
               ),
             ),
