@@ -59,8 +59,9 @@ class _ReaderScreenState extends State<ReaderScreen>
   final _pdf = PdfViewerController();
   late final _readAloud = ReadAloud(voices: services.voices);
   final _ink = InkController();
-  late final _pdfSearch = PdfBookSearch(_pdf);
-  bool _pdfSearchUsed = false;
+
+  /// Made on the first search: it needs the PDF to have opened.
+  PdfBookSearch? _pdfSearch;
   late final _pdfHighlighter = PdfHighlighter(
     _pdf,
     () => [
@@ -97,9 +98,11 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   BookSearch get _search {
     if (!_isPdf) return _web.search;
-    _pdfSearchUsed = true;
-    return _pdfSearch;
+    return _pdfSearch ??= PdfBookSearch(_pdf);
   }
+
+  void _paintPdfSearch(Canvas canvas, Rect pageRect, PdfPage page) =>
+      _pdfSearch?.paint(canvas, pageRect, page);
 
   late final _session = ReadingSession(services.stats, book.driveFileId);
   Timer? _sessionTimer;
@@ -206,7 +209,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     PlatformBridge.instance.keepScreenOn(false);
     _ink.dispose();
     _web.search.dispose();
-    if (_pdfSearchUsed) _pdfSearch.dispose();
+    _pdfSearch?.dispose();
     services.ink.flush();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     services.progress.flush();
@@ -422,6 +425,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   void _showSearch() {
+    if (_isPdf && !_pdf.isReady) return;
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -574,11 +578,14 @@ class _ReaderScreenState extends State<ReaderScreen>
           spread: spread,
           onToggleControls: _toggleControls,
           onStreamFailed: () {
+            // A search follows the document it started on.
+            _pdfSearch?.dispose();
+            _pdfSearch = null;
             setState(() => _streamUrl = null);
             _fetch();
           },
           bookId: book.driveFileId,
-          paintSearch: (_search as PdfBookSearch).paint,
+          paintSearch: _paintPdfSearch,
           highlighter: _pdfHighlighter,
           onSelection: (selection) => setState(
             () => _selection = selection == null
