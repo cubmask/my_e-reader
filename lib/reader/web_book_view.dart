@@ -187,7 +187,13 @@ class WebBookView extends StatefulWidget {
   /// Selected text and its CFI, or null when the selection is cleared.
   final void Function(({String cfi, String text})? selection) onSelection;
   final void Function(String cfi) onHighlightTapped;
-  final void Function(String cfi, double fraction, String chapter) onRelocate;
+  final void Function(
+    String cfi,
+    double fraction,
+    String chapter,
+    ({double section, double total})? timeLeft,
+  )
+  onRelocate;
   final void Function(String title, String author, List<TocItem> toc) onOpened;
   final void Function(String message) onError;
   final VoidCallback onToggleControls;
@@ -244,10 +250,14 @@ class _WebBookViewState extends State<WebBookView> {
       handlerName: 'relocate',
       callback: (args) {
         final d = args.first as Map;
+        final section = d['timeSection'], total = d['timeTotal'];
         widget.onRelocate(
           '${d['cfi']}',
           (d['fraction'] as num?)?.toDouble() ?? 0,
           '${d['chapter'] ?? ''}',
+          section is num && total is num
+              ? (section: section.toDouble(), total: total.toDouble())
+              : null,
         );
       },
     );

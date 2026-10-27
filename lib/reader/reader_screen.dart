@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import '../core/platform_bridge.dart';
 import '../core/file_type.dart';
 import '../library/book.dart';
 import '../library/cover_store.dart' show CoverKind;
+import '../library/reading_stats.dart';
 import '../notes/annotation_store.dart';
 import '../ui/breakpoints.dart';
 import '../ui/theme.dart';
@@ -50,7 +52,8 @@ class ReaderScreen extends StatefulWidget {
   State<ReaderScreen> createState() => _ReaderScreenState();
 }
 
-class _ReaderScreenState extends State<ReaderScreen> {
+class _ReaderScreenState extends State<ReaderScreen>
+    with WidgetsBindingObserver {
   final _web = WebBookController();
   final _pdf = PdfViewerController();
   late final _readAloud = ReadAloud(voices: services.voices);
@@ -97,9 +100,26 @@ class _ReaderScreenState extends State<ReaderScreen> {
     return _pdfSearch;
   }
 
+  late final _session = ReadingSession(services.stats, book.driveFileId);
+  Timer? _sessionTimer;
+
+  /// Estimated minutes left in the chapter, once known.
+  double? _chapterMinutes;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _session.paused = state != AppLifecycleState.resumed;
+  }
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _session.tick();
+    _sessionTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _session.tick(listening: _readAloud.playing),
+    );
     services.settings.addListener(_applyScreen);
     _applyScreen();
     final saved = services.progress[book.driveFileId];
@@ -172,6 +192,12 @@ class _ReaderScreenState extends State<ReaderScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _sessionTimer?.cancel();
+    _session
+      ..tick(listening: _readAloud.playing)
+      ..end();
+    services.stats.flush();
     BackgroundAudio.instance.detach(_readAloud);
     _readAloud.dispose();
     services.settings.removeListener(_applyScreen);
@@ -220,6 +246,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   void _save(String location, double fraction) {
+    if (fraction >= 0.995) services.stats.markFinished(book.driveFileId);
     setState(() {
       _fraction = fraction;
       _location = location;
@@ -392,6 +419,26 @@ class _ReaderScreenState extends State<ReaderScreen> {
     );
   }
 
+  /// Follows the PDF's outline for the chapter title and time left in it.
+  void _pdfPageChanged(int page, int count) {
+    TocItem? current;
+    int? nextStart;
+    for (final item in _toc) {
+      final start = int.tryParse(item.href.substring(5));
+      if (start == null) continue;
+      if (start <= page) {
+        current = item;
+      } else if (nextStart == null || start < nextStart) {
+        nextStart = start;
+      }
+    }
+    final chapter = current?.label ?? '';
+    if (chapter != _chapter && _chapter.isNotEmpty) _readAloud.chapterEnded();
+    _chapter = chapter;
+    final pagesLeft = (nextStart ?? count + 1) - page;
+    _chapterMinutes = pagesLeft * services.stats.secondsPerPage / 60;
+  }
+
   /// A PDF's outline becomes its contents.
   Future<void> _loadOutline(PdfDocument document) async {
     final outline = await document.loadOutline().catchError(
@@ -523,8 +570,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
           onReady: _loadOutline,
           ink: services.ink,
           inkController: _ink,
-          onPageChanged: (page, count) =>
-              _save('page:$page', count <= 1 ? 1 : (page - 1) / (count - 1)),
+          onPageChanged: (page, count) {
+            _session.activity(page: page);
+            _pdfPageChanged(page, count);
+            _save('page:$page', count <= 1 ? 1 : (page - 1) / (count - 1));
+          },
         ),
       );
     }
@@ -566,11 +616,17 @@ class _ReaderScreenState extends State<ReaderScreen> {
           for (final a in annotations.forBook(book.driveFileId))
             if (!a.isBookmark) (cfi: a.location, color: a.color.name),
         ],
-        onRelocate: (cfi, fraction, chapter) {
+        onRelocate: (cfi, fraction, chapter, timeLeft) {
           if (chapter != _chapter && _chapter.isNotEmpty) {
             _readAloud.chapterEnded();
           }
           _chapter = chapter;
+          if (timeLeft != null) {
+            _session.activity(unitsLeft: timeLeft.total);
+            _chapterMinutes = timeLeft.section * services.stats.minutesPerUnit;
+          } else {
+            _session.activity();
+          }
           _save(cfi, fraction);
         },
         onSelection: (selection) => setState(() => _selection = selection),
@@ -648,9 +704,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
                           style: Theme.of(context).textTheme.titleMedium
                               ?.copyWith(fontFamily: AppFonts.serif),
                         ),
-                        if (_chapter.isNotEmpty)
+                        if (_chapterLine() case final line?)
                           Text(
-                            _chapter,
+                            line,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.bodySmall
@@ -678,6 +734,17 @@ class _ReaderScreenState extends State<ReaderScreen> {
         ),
       ),
     );
+  }
+
+  /// The chapter and the time left in it, such as "Chapter 3 · 12 min
+  /// left in chapter".
+  String? _chapterLine() {
+    final minutes = _chapterMinutes;
+    final left = minutes == null
+        ? null
+        : '${formatMinutes(minutes)} left in ${_chapter.isEmpty ? 'section' : 'chapter'}';
+    final parts = [if (_chapter.isNotEmpty) _chapter, ?left];
+    return parts.isEmpty ? null : parts.join(' · ');
   }
 
   Widget _buildSelectionBar() {

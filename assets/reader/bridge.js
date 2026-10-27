@@ -219,6 +219,10 @@ window.reader = {
                 cfi: detail.cfi ?? '',
                 fraction: detail.fraction ?? 0,
                 chapter: detail.tocItem?.label ?? '',
+                // Time left in the chapter and the book, in foliate's
+                // units of 1600 bytes, which the app calibrates.
+                timeSection: detail.time?.section ?? null,
+                timeTotal: detail.time?.total ?? null,
             }))
             await view.init({ lastLocation: lastLocation || null, showTextStart: !lastLocation })
             send('opened', {

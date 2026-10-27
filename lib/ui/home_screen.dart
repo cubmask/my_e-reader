@@ -9,6 +9,7 @@ import '../reader/reader_services.dart';
 import 'book_cover.dart';
 import 'book_sheet.dart';
 import 'breakpoints.dart';
+import 'stats_screen.dart';
 import 'delete_books.dart';
 import 'duplicates_screen.dart';
 import 'library_screen.dart';
@@ -96,6 +97,7 @@ class HomeScreen extends StatelessWidget {
             padding: EdgeInsets.symmetric(horizontal: pad),
             child: _Greeting(
               current: current,
+              books: books,
               empty: books.isEmpty,
               services: services,
               wide: wide,
@@ -193,12 +195,14 @@ class HomeScreen extends StatelessWidget {
 class _Greeting extends StatelessWidget {
   const _Greeting({
     required this.current,
+    required this.books,
     required this.empty,
     required this.services,
     required this.wide,
   });
 
   final Book? current;
+  final List<Book> books;
   final bool empty;
   final ReaderServices services;
   final bool wide;
@@ -235,6 +239,8 @@ class _Greeting extends StatelessWidget {
           ),
           const SizedBox(height: 20),
           Text(line, style: theme.textTheme.bodyLarge?.copyWith(height: 1.7)),
+          const SizedBox(height: 16),
+          StatsChip(services: services, books: books),
           if (book != null) ...[
             const SizedBox(height: 28),
             FilledButton(
