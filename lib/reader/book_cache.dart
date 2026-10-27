@@ -222,19 +222,64 @@ class BookCache extends ChangeNotifier {
       book.driveFileId,
       $fields: 'id',
     );
+    await _exportEpub(copy.id!, file, onProgress);
+  }
+
+  /// Returns an EPUB of [source], an office document whose contents are
+  /// [actual] although [book]'s name says otherwise, converted by Drive.
+  ///
+  /// Drive picks how to import a copy from the file's recorded type, which
+  /// comes from its name, so the local bytes are uploaded with their real
+  /// type instead.
+  Future<File> convertMisnamed(
+    Book book,
+    File source,
+    BookFormat actual, {
+    void Function(double)? onProgress,
+  }) async {
+    final file = File(p.setExtension(source.path, '.epub'));
+    if (await file.exists()) return file;
+    final upload = await _api.files.create(
+      drive.File(
+        name: '${book.displayTitle} (My E-Reader conversion)',
+        mimeType: _googleDoc,
+      ),
+      uploadMedia: drive.Media(
+        source.openRead(),
+        await source.length(),
+        contentType: _officeTypes[actual]!,
+      ),
+      $fields: 'id',
+    );
+    await _exportEpub(upload.id!, file, onProgress);
+    return file;
+  }
+
+  /// Exports the Google Doc [docId] as EPUB to [file], then deletes the doc.
+  Future<void> _exportEpub(
+    String docId,
+    File file,
+    void Function(double)? onProgress,
+  ) async {
     try {
       final media = await _api.files.export(
-        copy.id!,
+        docId,
         'application/epub+zip',
         downloadOptions: drive.DownloadOptions.fullMedia,
       ) as drive.Media;
       await _write(media, file, media.length, onProgress);
     } finally {
-      await _api.files.delete(copy.id!).catchError((_) {});
+      await _api.files.delete(docId).catchError((_) {});
     }
   }
 
   static const _googleDoc = 'application/vnd.google-apps.document';
+  static const _officeTypes = {
+    BookFormat.doc: 'application/msword',
+    BookFormat.docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    BookFormat.rtf: 'application/rtf',
+    BookFormat.odt: 'application/vnd.oasis.opendocument.text',
+  };
 
   Future<void> _write(
     drive.Media media,

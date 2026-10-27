@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:pdfrx/pdfrx.dart';
 
 import '../core/book_format.dart';
+import '../core/file_type.dart';
 import '../library/book.dart';
 import '../library/cover_store.dart' show CoverKind;
 import '../notes/annotation_store.dart';
@@ -71,7 +72,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
   Book get book => widget.book;
   ReaderServices get services => widget.services;
   AnnotationStore get annotations => services.annotations;
-  bool get _isPdf => book.format == BookFormat.pdf;
+
+  /// The format the book opens as: what its contents turned out to be, which
+  /// can differ from what its name says (see [_fetch]).
+  late BookFormat _format = book.format;
+  bool get _isPdf => _format == BookFormat.pdf;
 
   @override
   void initState() {
@@ -89,22 +94,59 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   /// Opens a local copy, fetching the whole book from Drive if needed.
-  void _fetch() {
-    services.cache
-        .open(
-          book,
-          onProgress: (v) {
-            if (mounted) setState(() => _download = v);
-          },
-        )
-        .then(
-          (file) {
-            if (mounted) setState(() => _file = file);
-          },
-          onError: (Object e) {
-            if (mounted) setState(() => _error = '$e');
-          },
-        );
+  Future<void> _fetch() async {
+    void progress(double v) {
+      if (mounted) setState(() => _download = v);
+    }
+
+    try {
+      var file = await services.cache.open(book, onProgress: progress);
+      var format = book.format;
+      // Converted office documents are always EPUBs; anything else may be
+      // misnamed, so its contents decide how it opens.
+      if (!book.format.needsConversion) {
+        final actual = await sniffFile(file);
+        final open = formatToOpen(book.format, actual);
+        if (open == null) {
+          if (mounted) {
+            setState(() {
+              _error =
+                  'This file is really $actual, not ${_article(book.format)}, '
+                  'so it cannot be opened as a book.';
+            });
+          }
+          return;
+        }
+        if (open.needsConversion) {
+          if (mounted) setState(() => _download = null);
+          file = await services.cache.convertMisnamed(
+            book,
+            file,
+            open,
+            onProgress: progress,
+          );
+          format = BookFormat.epub;
+        } else {
+          format = open;
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _file = file;
+        _format = format;
+        // A saved page number means nothing to the reflowable engine.
+        if (format != BookFormat.pdf && _location.startsWith('page:')) {
+          _location = '';
+        }
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = '$e');
+    }
+  }
+
+  static String _article(BookFormat format) {
+    const an = {'EPUB', 'AZW3', 'FB2', 'RTF', 'ODT'};
+    return '${an.contains(format.label) ? 'an' : 'a'} ${format.label}';
   }
 
   @override
@@ -381,8 +423,10 @@ class _ReaderScreenState extends State<ReaderScreen> {
         // Converted office documents are EPUBs.
         fileName: book.format.needsConversion
             ? '${book.displayTitle}.epub'
-            : book.fileName,
-        format: book.format,
+            : _format == book.format
+            ? book.fileName
+            : '${book.displayTitle}${_format.extensions.first}',
+        format: _format,
         server: services.server,
         controller: _web,
         settings: services.settings,
