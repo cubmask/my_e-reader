@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../core/book_format.dart';
+import 'book_search.dart';
 import 'read_aloud.dart';
 import 'reader_server.dart';
 import 'reader_settings.dart';
@@ -55,6 +56,9 @@ class WebBookController {
 
   Future<void> clearSelection() => _run('window.reader.clearSelection()');
 
+  /// Searches the book; matches arrive through [WebBookSearch].
+  late final search = WebBookSearch(this);
+
   Future<List<SpeechSegment>?> _tts(String fn) async {
     final result = await _web?.callAsyncJavaScript(
       functionBody: 'return await window.reader.$fn()',
@@ -95,6 +99,53 @@ class WebSpeechSource implements SpeechSource {
 
   @override
   void stop() => _controller._run('window.reader.ttsStop()');
+}
+
+/// Searches a web book with foliate-js, which outlines the matches.
+class WebBookSearch extends BookSearch {
+  WebBookSearch(this._controller);
+
+  final WebBookController _controller;
+  int _run = 0;
+
+  @override
+  void start(String query) {
+    final run = ++_run;
+    _controller._web?.callAsyncJavaScript(
+      functionBody: 'window.reader.search(q, run)',
+      arguments: {'q': query, 'run': run},
+    );
+  }
+
+  @override
+  void cancel() {
+    _run++;
+    _controller._run('window.reader.clearSearch()');
+  }
+
+  void _onResults(Map d) {
+    if (d['run'] != _run) return;
+    final label = '${d['label'] ?? ''}';
+    addHits([
+      for (final item in (d['items'] as List? ?? const []))
+        if (item is Map)
+          SearchHit(
+            location: '${item['cfi']}',
+            label: label,
+            pre: '${item['pre'] ?? ''}',
+            match: '${item['match'] ?? ''}',
+            post: '${item['post'] ?? ''}',
+          ),
+    ]);
+  }
+
+  void _onProgress(Map d, {bool done = false}) {
+    if (d['run'] != _run) return;
+    setProgress((d['progress'] as num?)?.toDouble(), done: done);
+  }
+
+  @override
+  Future<void> goTo(SearchHit hit) => _controller.goTo(hit.location);
 }
 
 /// A highlight to draw: its CFI and colour name.
@@ -240,6 +291,27 @@ class _WebBookViewState extends State<WebBookView> {
       callback: (args) {
         final data = args.firstOrNull;
         if (data is String) widget.onCover?.call(base64Decode(data));
+      },
+    );
+    final search = widget.controller.search;
+    web.addJavaScriptHandler(
+      handlerName: 'searchResults',
+      callback: (args) {
+        if (args.firstOrNull case final Map d) search._onResults(d);
+      },
+    );
+    web.addJavaScriptHandler(
+      handlerName: 'searchProgress',
+      callback: (args) {
+        if (args.firstOrNull case final Map d) search._onProgress(d);
+      },
+    );
+    web.addJavaScriptHandler(
+      handlerName: 'searchDone',
+      callback: (args) {
+        if (args.firstOrNull case final Map d) {
+          search._onProgress(d, done: true);
+        }
       },
     );
     web.addJavaScriptHandler(

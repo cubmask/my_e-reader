@@ -13,6 +13,7 @@ import '../ui/breakpoints.dart';
 import '../ui/theme.dart';
 import '../ui/voice_settings.dart';
 import 'book_cache.dart';
+import 'book_search.dart';
 import 'ink_layer.dart';
 import 'pdf_book_view.dart';
 import 'progress_store.dart';
@@ -50,6 +51,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
   final _pdf = PdfViewerController();
   late final _readAloud = ReadAloud(voices: services.voices);
   final _ink = InkController();
+  late final _pdfSearch = PdfBookSearch(_pdf);
+  bool _pdfSearchUsed = false;
   File? _file;
 
   /// Set instead of [_file] when a PDF is paged in straight from Drive.
@@ -73,6 +76,12 @@ class _ReaderScreenState extends State<ReaderScreen> {
   /// can differ from what its name says (see [_fetch]).
   late BookFormat _format = book.format;
   bool get _isPdf => _format == BookFormat.pdf;
+
+  BookSearch get _search {
+    if (!_isPdf) return _web.search;
+    _pdfSearchUsed = true;
+    return _pdfSearch;
+  }
 
   @override
   void initState() {
@@ -150,6 +159,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
     BackgroundAudio.instance.detach(_readAloud);
     _readAloud.dispose();
     _ink.dispose();
+    _web.search.dispose();
+    if (_pdfSearchUsed) _pdfSearch.dispose();
     services.ink.flush();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     services.progress.flush();
@@ -297,6 +308,26 @@ class _ReaderScreenState extends State<ReaderScreen> {
     );
   }
 
+  void _showSearch() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.7,
+          maxChildSize: 0.95,
+          builder: (context, scroll) =>
+              SearchPanel(search: _search, scroll: scroll),
+        ),
+      ),
+    );
+  }
+
   // Read aloud
 
   Future<void> _toggleReadAloud() async {
@@ -394,6 +425,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
             _fetch();
           },
           bookId: book.driveFileId,
+          paintSearch: (_search as PdfBookSearch).paint,
           ink: services.ink,
           inkController: _ink,
           onPageChanged: (page, count) =>
@@ -592,6 +624,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
               tooltip: 'Contents',
               onPressed: () => Scaffold.of(context).openEndDrawer(),
             ),
+          ToolbarItem(
+            icon: Icons.search,
+            tooltip: 'Search this book',
+            onPressed: _showSearch,
+          ),
           ToolbarItem(
             icon: bookmarked ? Icons.bookmark : Icons.bookmark_border,
             tooltip: bookmarked ? 'Remove bookmark' : 'Bookmark this page',

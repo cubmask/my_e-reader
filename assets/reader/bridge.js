@@ -23,6 +23,7 @@ const annotations = new Map()
 let speaking = false
 let selectionTimer
 let style = { theme: 'light', fontSize: 100, lineHeight: 1.5 }
+let searchRun = 0
 
 const css = () => {
     const t = themes[style.theme] ?? themes.light
@@ -254,6 +255,32 @@ window.reader = {
     ttsStop() {
         speaking = false
         view?.renderer.getContents().forEach(({ doc }) => doc.getSelection()?.removeAllRanges())
+    },
+    // Searches the whole book, reporting matches section by section so the
+    // first ones show at once. A newer search or clearSearch() ends it.
+    // [run] tags the reports so the app can ignore an older search's.
+    async search(query, run) {
+        searchRun = run
+        try {
+            for await (const result of view.search({ query })) {
+                if (run !== searchRun) return
+                if (result === 'done') break
+                if (result.progress != null) send('searchProgress', { run, progress: result.progress })
+                if (result.subitems) send('searchResults', {
+                    run,
+                    label: result.label ?? '',
+                    items: result.subitems.map(({ cfi, excerpt }) =>
+                        ({ cfi, pre: excerpt.pre, match: excerpt.match, post: excerpt.post })),
+                })
+            }
+        } catch (e) {
+            console.warn(e)
+        }
+        if (run === searchRun) send('searchDone', { run })
+    },
+    clearSearch() {
+        searchRun = -1
+        view?.clearSearch()
     },
     setColumns: n => view?.renderer.setAttribute('max-column-count', String(n)),
     setStyle(next) {

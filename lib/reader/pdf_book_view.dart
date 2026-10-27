@@ -22,6 +22,7 @@ class PdfBookView extends StatefulWidget {
     required this.onToggleControls,
     this.onStreamFailed,
     required this.bookId,
+    this.paintSearch,
     required this.ink,
     required this.inkController,
   });
@@ -32,6 +33,9 @@ class PdfBookView extends StatefulWidget {
   /// A URL that answers range requests, so pages load as they are needed.
   final Uri? streamUrl;
   final String bookId;
+
+  /// Draws search matches on a page.
+  final PdfViewerPagePaintCallback? paintSearch;
   final InkStore ink;
   final InkController inkController;
   final PdfViewerController controller;
@@ -110,6 +114,7 @@ class _PdfBookViewState extends State<PdfBookView> {
           widget.onPageChanged(page, _controller.pageCount);
         }
       },
+      pagePaintCallbacks: [?widget.paintSearch],
       pageOverlaysBuilder: (context, rect, page) => [
         InkPageLayer(
           key: ValueKey(page.pageNumber),
