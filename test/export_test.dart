@@ -1,5 +1,3 @@
-import 'dart:ui' show Offset;
-
 import 'package:ebook_reader/notes/export.dart';
 import 'package:ebook_reader/notes/ink_store.dart';
 import 'package:flutter_test/flutter_test.dart';
