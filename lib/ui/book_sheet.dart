@@ -684,6 +684,7 @@ class _MetadataPickerState extends State<MetadataPicker> {
                                 : Image.network(
                                     cover.toString(),
                                     fit: BoxFit.cover,
+                                    cacheWidth: 144,
                                     errorBuilder: (_, _, _) => Container(
                                       color: theme
                                           .colorScheme

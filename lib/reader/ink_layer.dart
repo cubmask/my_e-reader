@@ -320,7 +320,13 @@ class _InkPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_InkPainter old) => true;
+  bool shouldRepaint(_InkPainter old) =>
+      !identical(strokes, old.strokes) ||
+      !identical(live, old.live) ||
+      liveColor != old.liveColor ||
+      liveWidth != old.liveWidth ||
+      liveHighlighter != old.liveHighlighter ||
+      scale != old.scale;
 }
 
 /// Tools shown while pen mode is on.

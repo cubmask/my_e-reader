@@ -61,13 +61,22 @@ class BookCover extends StatelessWidget {
               fit: StackFit.expand,
               children: [
                 if (image != null)
-                  Image.file(
-                    image,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, _, _) => GeneratedCover(
-                      seed: book.driveFileId,
-                      title: title,
-                      author: author,
+                  LayoutBuilder(
+                    // Decode the picture at the size it is shown, not at
+                    // the size it was downloaded, to keep memory down.
+                    builder: (context, box) => Image.file(
+                      image,
+                      fit: BoxFit.cover,
+                      cacheWidth: box.maxWidth.isFinite
+                          ? (box.maxWidth *
+                                    MediaQuery.devicePixelRatioOf(context))
+                                .ceil()
+                          : null,
+                      errorBuilder: (_, _, _) => GeneratedCover(
+                        seed: book.driveFileId,
+                        title: title,
+                        author: author,
+                      ),
                     ),
                   )
                 else

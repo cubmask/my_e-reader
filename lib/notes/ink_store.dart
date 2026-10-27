@@ -170,17 +170,32 @@ class InkStore extends ChangeNotifier {
   Future<void> _saving = Future.value();
 
   /// Live strokes on one page, oldest first so later ones draw on top.
+  ///
+  /// The same list is returned until the ink changes, so painters can tell
+  /// cheaply whether there is anything new to draw.
   List<InkStroke> forPage(String bookId, int page) =>
-      _all.values
-          .where((s) => !s.deleted && s.bookId == bookId && s.page == page)
-          .toList()
-        ..sort((a, b) => a.id.compareTo(b.id));
+      _pages.putIfAbsent((bookId, page), () {
+        return List.unmodifiable(
+          _all.values
+              .where((s) => !s.deleted && s.bookId == bookId && s.page == page)
+              .toList()
+            ..sort((a, b) => a.id.compareTo(b.id)),
+        );
+      });
 
   /// Pages of a book that have ink on them.
   Set<int> pagesWithInk(String bookId) => {
     for (final s in _all.values)
       if (!s.deleted && s.bookId == bookId) s.page,
   };
+
+  final _pages = <(String, int), List<InkStroke>>{};
+
+  @override
+  void notifyListeners() {
+    _pages.clear();
+    super.notifyListeners();
+  }
 
   Future<void> load() async {
     final file = _localFile;

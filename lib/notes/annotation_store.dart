@@ -180,13 +180,31 @@ class AnnotationStore extends ChangeNotifier {
   int _counter = 0;
 
   /// Live annotations, newest first.
-  List<Annotation> get all =>
-      _all.values.where((a) => !a.deleted).toList()
-        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  ///
+  /// Kept sorted until the annotations change, as lists and the reader ask
+  /// for them on every rebuild.
+  List<Annotation> get all => _sorted ??= List.unmodifiable(
+    _all.values.where((a) => !a.deleted).toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt)),
+  );
 
   /// Live annotations of one book, in creation order.
-  List<Annotation> forBook(String bookId) =>
-      all.where((a) => a.bookId == bookId).toList().reversed.toList();
+  List<Annotation> forBook(String bookId) => _byBook.putIfAbsent(
+    bookId,
+    () => List.unmodifiable(
+      all.where((a) => a.bookId == bookId).toList().reversed,
+    ),
+  );
+
+  List<Annotation>? _sorted;
+  final _byBook = <String, List<Annotation>>{};
+
+  @override
+  void notifyListeners() {
+    _sorted = null;
+    _byBook.clear();
+    super.notifyListeners();
+  }
 
   Annotation? byLocation(String bookId, String location) => all
       .where((a) => a.bookId == bookId && a.location == location)
