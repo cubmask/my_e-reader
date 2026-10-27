@@ -172,6 +172,52 @@ void main() {
     ]);
   });
 
+  test('a misnamed office document is uploaded with its real type', () async {
+    final calls = <String>[];
+    final client = MockClient((request) async {
+      calls.add('${request.method} ${request.url.path}');
+      if (request.url.path.startsWith('/upload/')) {
+        expect(request.body, contains('application/msword'));
+        expect(request.body, contains('application/vnd.google-apps.document'));
+        return http.Response(
+          '{"id":"tmp"}',
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (request.url.path.endsWith('/export')) {
+        return http.Response.bytes(
+          List.filled(10, 1),
+          200,
+          headers: {'content-type': 'application/epub+zip'},
+        );
+      }
+      return http.Response('', 204);
+    });
+    final office = BookCache(drive.DriveApi(client), dir);
+    final source = File('${dir.path}/stream/w_0.pdf')
+      ..createSync(recursive: true)
+      ..writeAsStringSync('not really a pdf');
+    const book = Book(
+      driveFileId: 'w',
+      fileName: 'Notes.pdf',
+      format: BookFormat.pdf,
+      folderPath: '',
+    );
+    final file = await office.convertMisnamed(book, source, BookFormat.doc);
+    expect(file.path, endsWith('w_0.epub'));
+    expect(await file.length(), 10);
+    expect(calls, [
+      'POST /upload/drive/v3/files',
+      'GET /drive/v3/files/tmp/export',
+      'DELETE /drive/v3/files/tmp',
+    ]);
+
+    calls.clear();
+    await office.convertMisnamed(book, source, BookFormat.doc);
+    expect(calls, isEmpty);
+  });
+
   test('deleteFromDrive deletes the file in Drive and on the device', () async {
     final requests = <http.Request>[];
     final api = drive.DriveApi(
