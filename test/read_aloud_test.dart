@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:ebook_reader/reader/read_aloud.dart';
+import 'package:fake_async/fake_async.dart';
 import 'package:ebook_reader/reader/tts/speech_engine.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -217,5 +218,48 @@ void main() {
     expect(engine.spoken, ['Call me Ishmael.', 'Some years ago']);
     expect(voices.declared, 'en');
     expect(reader.active, isFalse);
+  });
+
+  test('the sleep timer pauses reading when it runs out', () {
+    fakeAsync((async) {
+      final engine = _FakeEngine(canPause: true)..gate = Completer<void>();
+      final reader = ReadAloud(voices: _FakeVoices(engine));
+      reader.play(
+        _Source([
+          [const SpeechSegment('One.')],
+        ]),
+      );
+      async.flushMicrotasks();
+      reader.setSleepTimer(const Duration(minutes: 15));
+      expect(reader.sleepAt, isNotNull);
+      async.elapse(const Duration(minutes: 14));
+      expect(reader.paused, isFalse);
+      async.elapse(const Duration(minutes: 2));
+      expect(reader.paused, isTrue);
+      expect(reader.sleepAt, isNull);
+      reader.dispose();
+    });
+  });
+
+  test('a chapter sleep timer pauses when the chapter changes', () async {
+    final engine = _FakeEngine(canPause: true)..gate = Completer<void>();
+    final reader = ReadAloud(voices: _FakeVoices(engine));
+    unawaited(
+      reader.play(
+        _Source([
+          [const SpeechSegment('One.')],
+        ]),
+      ),
+    );
+    await _settle();
+    reader.chapterEnded();
+    expect(reader.paused, isFalse, reason: 'no timer set');
+    reader.sleepAtEndOfChapter();
+    expect(reader.sleepAtChapterEnd, isTrue);
+    reader.chapterEnded();
+    await _settle();
+    expect(reader.paused, isTrue);
+    expect(reader.sleepAtChapterEnd, isFalse);
+    await reader.stop();
   });
 }

@@ -567,6 +567,9 @@ class _ReaderScreenState extends State<ReaderScreen> {
             if (!a.isBookmark) (cfi: a.location, color: a.color.name),
         ],
         onRelocate: (cfi, fraction, chapter) {
+          if (chapter != _chapter && _chapter.isNotEmpty) {
+            _readAloud.chapterEnded();
+          }
           _chapter = chapter;
           _save(cfi, fraction);
         },
@@ -895,6 +898,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
           ),
         ),
         const Spacer(),
+        _SleepButton(readAloud: _readAloud, byChapter: !_isPdf),
+        const SizedBox(width: 8),
         SegmentedButton<double>(
           showSelectedIcon: false,
           segments: [
@@ -1122,6 +1127,66 @@ class _Notice extends StatelessWidget {
       child: Text(text, textAlign: TextAlign.center),
     ),
   );
+}
+
+/// Sets the read-aloud sleep timer, showing the minutes left while it runs.
+class _SleepButton extends StatelessWidget {
+  const _SleepButton({required this.readAloud, required this.byChapter});
+
+  final ReadAloud readAloud;
+
+  /// Whether "End of chapter" is offered; PDFs have no chapters to follow.
+  final bool byChapter;
+
+  static const _minutes = [5, 10, 15, 30, 45, 60];
+
+  @override
+  Widget build(BuildContext context) {
+    final at = readAloud.sleepAt;
+    final left = at == null
+        ? null
+        : (at.difference(DateTime.now()).inSeconds / 60).ceil().clamp(1, 999);
+    final on = at != null || readAloud.sleepAtChapterEnd;
+    return PopupMenuButton<int>(
+      tooltip: 'Sleep timer',
+      onSelected: (v) => switch (v) {
+        0 => readAloud.setSleepTimer(null),
+        -1 => readAloud.sleepAtEndOfChapter(),
+        _ => readAloud.setSleepTimer(Duration(minutes: v)),
+      },
+      itemBuilder: (_) => [
+        if (on) const PopupMenuItem(value: 0, child: Text('Off')),
+        for (final m in _minutes)
+          PopupMenuItem(value: m, child: Text('$m minutes')),
+        if (byChapter)
+          PopupMenuItem(
+            value: -1,
+            enabled: !readAloud.sleepAtChapterEnd,
+            child: const Text('End of chapter'),
+          ),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              on ? Icons.bedtime : Icons.bedtime_outlined,
+              size: 22,
+              color: on ? Theme.of(context).colorScheme.primary : null,
+            ),
+            if (left != null) ...[
+              const SizedBox(width: 4),
+              Text('$left min'),
+            ] else if (readAloud.sleepAtChapterEnd) ...[
+              const SizedBox(width: 4),
+              const Text('Chapter'),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// Keeps the book on the device for offline reading, or frees the space.
