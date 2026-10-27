@@ -16,6 +16,7 @@ import 'book_cache.dart';
 import 'book_search.dart';
 import 'ink_layer.dart';
 import 'pdf_book_view.dart';
+import 'pdf_highlights.dart';
 import 'progress_store.dart';
 import 'reader_chrome.dart';
 import 'read_aloud.dart';
@@ -53,6 +54,14 @@ class _ReaderScreenState extends State<ReaderScreen> {
   final _ink = InkController();
   late final _pdfSearch = PdfBookSearch(_pdf);
   bool _pdfSearchUsed = false;
+  late final _pdfHighlighter = PdfHighlighter(
+    _pdf,
+    () => [
+      for (final a in annotations.forBook(book.driveFileId))
+        if (PdfTextLocation.parse(a.location) case final location?)
+          (location: location, color: highlightSwatches[a.color]!),
+    ],
+  );
   File? _file;
 
   /// Set instead of [_file] when a PDF is paged in straight from Drive.
@@ -66,6 +75,8 @@ class _ReaderScreenState extends State<ReaderScreen> {
   double _fraction = 0;
   String _chapter = '';
   String _location = '';
+
+  /// Selected text: a CFI in a web book, a [PdfTextLocation] in a PDF.
   ({String cfi, String text})? _selection;
 
   Book get book => widget.book;
@@ -191,10 +202,12 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 
   int get _initialPdfPage =>
-      int.tryParse(_location.replaceFirst('page:', '')) ?? 1;
+      int.tryParse(_location.replaceFirst('page:', '')) ??
+      PdfTextLocation.parse(_location)?.ranges.first.page ??
+      1;
 
   Future<void> _goTo(Annotation a) async {
-    if (a.page case final page?) {
+    if (a.page case final page? when _isPdf) {
       await _pdf.goToPage(pageNumber: page);
     } else {
       await _web.goTo(a.location);
@@ -215,7 +228,21 @@ class _ReaderScreenState extends State<ReaderScreen> {
       note: note,
       color: color,
     );
-    await _web.addHighlight(selection.cfi, color.name);
+    await _drawHighlight(selection.cfi, color);
+  }
+
+  Future<void> _drawHighlight(String location, HighlightColor color) async {
+    if (_isPdf) {
+      await _clearSelection();
+      if (_pdf.isReady) _pdf.invalidate();
+    } else {
+      await _web.addHighlight(location, color.name);
+    }
+  }
+
+  Future<void> _clearSelection() async {
+    if (!_isPdf) return _web.clearSelection();
+    if (_pdf.isReady) await _pdf.textSelectionDelegate.clearTextSelection();
   }
 
   Future<void> _highlightWithNote() async {
@@ -254,13 +281,17 @@ class _ReaderScreenState extends State<ReaderScreen> {
     switch (result) {
       case _Recolor(:final color):
         await annotations.update(a.copyWith(color: color));
-        await _web.addHighlight(a.location, color.name);
+        await _drawHighlight(a.location, color);
       case _EditNote():
         final note = await _editNote(context, a.note);
         if (note != null) await annotations.update(a.copyWith(note: note));
       case _Delete():
         await annotations.remove(a);
-        if (!a.isBookmark) await _web.removeHighlight(a.location);
+        if (_isPdf) {
+          if (_pdf.isReady) _pdf.invalidate();
+        } else if (!a.isBookmark) {
+          await _web.removeHighlight(a.location);
+        }
     }
     setState(() {});
   }
@@ -326,6 +357,25 @@ class _ReaderScreenState extends State<ReaderScreen> {
         ),
       ),
     );
+  }
+
+  /// A PDF's outline becomes its contents.
+  Future<void> _loadOutline(PdfDocument document) async {
+    final outline = await document.loadOutline().catchError(
+      (_) => <PdfOutlineNode>[],
+    );
+    final toc = <TocItem>[];
+    void walk(List<PdfOutlineNode> nodes, int depth) {
+      for (final n in nodes) {
+        if (n.dest case final dest?) {
+          toc.add(TocItem(n.title.trim(), 'page:${dest.pageNumber}', depth));
+        }
+        walk(n.children, depth + 1);
+      }
+    }
+
+    walk(outline, 0);
+    if (mounted && toc.isNotEmpty) setState(() => _toc = toc);
   }
 
   // Read aloud
@@ -426,6 +476,17 @@ class _ReaderScreenState extends State<ReaderScreen> {
           },
           bookId: book.driveFileId,
           paintSearch: (_search as PdfBookSearch).paint,
+          highlighter: _pdfHighlighter,
+          onSelection: (selection) => setState(
+            () => _selection = selection == null
+                ? null
+                : (cfi: selection.location, text: selection.text),
+          ),
+          onHighlightTapped: (location) {
+            final a = annotations.byLocation(book.driveFileId, location);
+            if (a != null) _openAnnotation(a);
+          },
+          onReady: _loadOutline,
           ink: services.ink,
           inkController: _ink,
           onPageChanged: (page, count) =>
@@ -589,11 +650,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
         paper: _background(),
         onCopy: () {
           Clipboard.setData(ClipboardData(text: selection.text));
-          _web.clearSelection();
+          _clearSelection();
           setState(() => _selection = null);
         },
         onReadAloud: () async {
-          _web.clearSelection();
+          _clearSelection();
           setState(() {
             _selection = null;
             _controls = true;
@@ -665,20 +726,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
           children: [
             SizedBox(
               width: 200,
-              child: isWeb
-                  ? Slider(
-                      value: _fraction.clamp(0, 1),
-                      onChanged: (v) => setState(() => _fraction = v),
-                      onChangeEnd: _web.goToFraction,
-                    )
-                  : Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: LinearProgressIndicator(
-                        value: _fraction,
-                        minHeight: 4,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
+              child: Slider(
+                value: _fraction.clamp(0, 1),
+                onChanged: (v) => setState(() => _fraction = v),
+                onChangeEnd: isWeb ? _web.goToFraction : _goToPdfFraction,
+              ),
             ),
             SizedBox(width: 44, child: percent),
           ],
@@ -733,6 +785,12 @@ class _ReaderScreenState extends State<ReaderScreen> {
         ),
       ),
     );
+  }
+
+  void _goToPdfFraction(double fraction) {
+    if (!_pdf.isReady) return;
+    final count = _pdf.pageCount;
+    _pdf.goToPage(pageNumber: (fraction * (count - 1)).round() + 1);
   }
 
   /// Which voice is reading, such as "German · Supertonic 3".
@@ -813,7 +871,14 @@ class _ReaderScreenState extends State<ReaderScreen> {
                 title: Text(item.label),
                 onTap: () {
                   Navigator.of(context).pop();
-                  _web.goTo(item.href);
+                  final page = item.href.startsWith('page:')
+                      ? int.tryParse(item.href.substring(5))
+                      : null;
+                  if (page != null) {
+                    _pdf.goToPage(pageNumber: page);
+                  } else {
+                    _web.goTo(item.href);
+                  }
                 },
               ),
           ],
