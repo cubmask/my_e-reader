@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../library/book.dart';
+import '../library/book_health.dart';
 import '../library/book_meta_store.dart';
 import '../library/book_uploader.dart';
 import '../library/converter.dart';
@@ -39,6 +40,7 @@ class ReaderServices {
     required this.metadata,
     required this.newBooks,
     DuplicateAlerts? duplicates,
+    BookHealth? health,
     required this.server,
     required this.settings,
     this.voices,
@@ -47,6 +49,7 @@ class ReaderServices {
     this.uploader,
     this.converter,
   }) : duplicates = duplicates ?? DuplicateAlerts(),
+       health = health ?? BookHealth(null, null),
        lookup = lookup ?? LookupService(http.Client()),
        stats = stats ?? ReadingStats(null, null, device: 'test');
 
@@ -59,6 +62,9 @@ class ReaderServices {
   final MetadataUpdater metadata;
   final NewBooks newBooks;
   final DuplicateAlerts duplicates;
+
+  /// Books that will not open, found by a check or in the reader.
+  final BookHealth health;
   final ReaderServer server;
   final ReaderSettings settings;
 
@@ -134,6 +140,7 @@ class ReaderServices {
         covers,
       ),
       newBooks: NewBooks(),
+      health: BookHealth(api, File(p.join(dir.path, 'book_health.json'))),
       server: ReaderServer(drive: client),
       settings: ReaderSettings(),
       voices: VoiceStore(Directory(p.join(dir.path, 'voices'))),
@@ -155,6 +162,7 @@ class ReaderServices {
       services.metadata.load(),
       services.newBooks.load(),
       services.duplicates.load(),
+      services.health.load(),
       services.settings.load(),
       services.voices!.load(),
       services.stats.load(),

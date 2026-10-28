@@ -4,6 +4,7 @@ import 'package:ebook_reader/app.dart';
 import 'package:ebook_reader/core/book_format.dart';
 import 'package:ebook_reader/drive/drive_auth.dart';
 import 'package:ebook_reader/library/book.dart';
+import 'package:ebook_reader/library/book_health.dart';
 import 'package:ebook_reader/library/book_meta_store.dart';
 import 'package:ebook_reader/library/cover_store.dart';
 import 'package:ebook_reader/library/library_controller.dart';
@@ -18,6 +19,7 @@ import 'package:ebook_reader/reader/progress_store.dart';
 import 'package:ebook_reader/reader/reader_server.dart';
 import 'package:ebook_reader/reader/reader_services.dart';
 import 'package:ebook_reader/reader/reader_settings.dart';
+import 'package:ebook_reader/ui/book_health_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
@@ -264,6 +266,37 @@ void main() {
       expect(left, isNot(contains('z2')));
       expect(left, isNot(contains('z3')));
       expect(find.text('Duplicates found'), findsNothing);
+    });
+
+    testWidgets('Books that will not open are listed on a $name', (
+      tester,
+    ) async {
+      final controller = await signedIn(tester);
+      final health = controller.services!.health;
+      await tester.runAsync(
+        () => health.readerFailed(books[1], 'The reader gave up.'),
+      );
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(home: BookHealthScreen(controller: controller)),
+      );
+      expect(find.text('Failed in the reader (1)'), findsOneWidget);
+      expect(find.textContaining('The reader gave up.'), findsOneWidget);
+      expect(find.text('Check all 7 books'), findsOneWidget);
+
+      // This fake Drive fails without saying why, which says nothing about
+      // the books.
+      await tester.tap(find.text('Check all 7 books'));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 300)),
+      );
+      await tester.pump();
+      expect(health.scanning, isFalse);
+      expect(find.text('7 books could not be checked this time.'), findsOne);
+      expect(find.text('Check 7 new or changed books'), findsOneWidget);
+      expect(find.text('${ProblemKind.reader.label} (1)'), findsOneWidget);
     });
 
     testWidgets('Library lists every book on a $name', (tester) async {

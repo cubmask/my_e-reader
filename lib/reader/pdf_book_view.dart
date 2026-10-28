@@ -29,6 +29,7 @@ class PdfBookView extends StatefulWidget {
     this.onSelection,
     this.onHighlightTapped,
     this.onReady,
+    this.onFailed,
     required this.ink,
     required this.inkController,
   });
@@ -52,6 +53,9 @@ class PdfBookView extends StatefulWidget {
 
   /// Called once the document has opened.
   final void Function(PdfDocument document)? onReady;
+
+  /// Called with the message shown when the document will not open.
+  final void Function(String message)? onFailed;
   final InkStore ink;
   final InkController inkController;
   final PdfViewerController controller;
@@ -75,6 +79,7 @@ class PdfBookView extends StatefulWidget {
 class _PdfBookViewState extends State<PdfBookView> {
   PdfViewerController get _controller => widget.controller;
   bool _streamFailed = false;
+  bool _failed = false;
   Timer? _selectionTimer;
 
   @override
@@ -114,15 +119,23 @@ class _PdfBookViewState extends State<PdfBookView> {
     final file = widget.file;
     return FutureBuilder(
       future: file == null ? Future.value(true) : looksLikePdf(file),
-      builder: (context, isPdf) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Text(
-            isPdf.hasData ? pdfErrorMessage(error, isPdf: isPdf.data!) : '',
-            textAlign: TextAlign.center,
+      builder: (context, isPdf) {
+        final message = isPdf.hasData
+            ? pdfErrorMessage(error, isPdf: isPdf.data!)
+            : '';
+        if (isPdf.hasData && !_failed) {
+          _failed = true;
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => widget.onFailed?.call(message),
+          );
+        }
+        return Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Text(message, textAlign: TextAlign.center),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 

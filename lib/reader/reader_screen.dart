@@ -9,6 +9,7 @@ import '../core/book_format.dart';
 import '../core/platform_bridge.dart';
 import '../core/file_type.dart';
 import '../library/book.dart';
+import '../library/book_health.dart' show ProblemKind;
 import '../library/cover_store.dart' show CoverKind;
 import '../library/reading_stats.dart';
 import '../notes/annotation_store.dart';
@@ -153,13 +154,15 @@ class _ReaderScreenState extends State<ReaderScreen>
         final actual = await sniffFile(file);
         final open = formatToOpen(book.format, actual);
         if (open == null) {
-          if (mounted) {
-            setState(() {
-              _error =
-                  'This file is really $actual, not ${_article(book.format)}, '
-                  'so it cannot be opened as a book.';
-            });
-          }
+          final message =
+              'This file is really $actual, not ${_article(book.format)}, '
+              'so it cannot be opened as a book.';
+          services.health.readerFailed(
+            book,
+            message,
+            kind: ProblemKind.notABook,
+          );
+          if (mounted) setState(() => _error = message);
           return;
         }
         if (open.needsConversion) {
@@ -185,6 +188,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         }
       });
     } catch (e) {
+      services.health.readerFailed(book, e);
       if (mounted) setState(() => _error = '$e');
     }
   }
@@ -596,7 +600,11 @@ class _ReaderScreenState extends State<ReaderScreen>
             final a = annotations.byLocation(book.driveFileId, location);
             if (a != null) _openAnnotation(a);
           },
-          onReady: _loadOutline,
+          onReady: (document) {
+            services.health.opened(book);
+            _loadOutline(document);
+          },
+          onFailed: (message) => services.health.readerFailed(book, message),
           ink: services.ink,
           inkController: _ink,
           onPageChanged: (page, count) {
@@ -664,6 +672,7 @@ class _ReaderScreenState extends State<ReaderScreen>
           if (a != null) _openAnnotation(a);
         },
         onOpened: (title, author, toc) => setState(() {
+          services.health.opened(book);
           // A converted document's title is its temporary copy's name.
           if (!book.format.needsConversion) {
             services.meta.fillIn(
@@ -680,7 +689,10 @@ class _ReaderScreenState extends State<ReaderScreen>
           _controls = false;
           SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
         }),
-        onError: (message) => setState(() => _error = message),
+        onError: (message) {
+          services.health.readerFailed(book, message);
+          setState(() => _error = message);
+        },
         onToggleControls: _toggleControls,
         onCover: (jpeg) =>
             services.covers.save(book.driveFileId, CoverKind.book, jpeg),
