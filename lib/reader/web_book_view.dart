@@ -232,12 +232,21 @@ class _WebBookViewState extends State<WebBookView> {
   }
 
   Map<String, Object?>? _style;
+  TapZones? _tapZones;
 
   /// Restyles the book, but only when something it shows has changed:
   /// restyling lays the whole chapter out again.
   void _applyStyle() {
+    final zones = widget.settings.tapZones;
+    if (zones != _tapZones) {
+      _tapZones = zones;
+      widget.controller._web?.callAsyncJavaScript(
+        functionBody: 'window.reader.setTapZones(z)',
+        arguments: {'z': zones.name},
+      );
+    }
     final style = widget.settings.webStyle;
-    if (mapEquals(style, _style)) return;
+    if (_style != null && jsonEncode(style) == jsonEncode(_style)) return;
     _style = style;
     widget.controller._web?.callAsyncJavaScript(
       functionBody: 'window.reader.setStyle(s)',
@@ -351,6 +360,7 @@ class _WebBookViewState extends State<WebBookView> {
       },
       onLoadStop: (web, _) {
         _style = widget.settings.webStyle;
+        _tapZones = widget.settings.tapZones;
         web.callAsyncJavaScript(
           functionBody: 'await window.reader.open(args)',
           arguments: {
@@ -360,6 +370,7 @@ class _WebBookViewState extends State<WebBookView> {
               'lastLocation': widget.initialLocation,
               'columns': widget.columns,
               'style': _style,
+              'tapZones': _tapZones!.name,
               'annotations': [
                 for (final h in widget.highlights)
                   {'cfi': h.cfi, 'color': h.color},

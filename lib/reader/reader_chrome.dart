@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../notes/annotation_store.dart';
 import 'progress_store.dart';
+import 'reader_settings.dart';
 import '../ui/theme.dart';
 
 /// Highlight colours as drawn on the page and in lists.
@@ -318,6 +319,35 @@ class ElsewhereBanner extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Shades where a tap goes back and where it goes forward, shown for a
+/// moment when a book opens.
+class TapZonesHint extends StatelessWidget {
+  const TapZonesHint({super.key, required this.zones, required this.ink});
+
+  final TapZones zones;
+  final Color ink;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = Theme.of(context).textTheme.titleMedium
+        ?.copyWith(color: ink.withValues(alpha: 0.7));
+    Widget zone(String label) => Expanded(
+      child: ColoredBox(
+        color: ink.withValues(alpha: 0.07),
+        child: Center(child: Text(label, style: style)),
+      ),
+    );
+    final children = [
+      zone('Back'),
+      const Expanded(child: SizedBox()),
+      zone('Next'),
+    ];
+    return zones == TapZones.topBottom
+        ? Column(children: children)
+        : Row(children: children);
   }
 }
 

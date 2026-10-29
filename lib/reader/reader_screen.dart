@@ -143,6 +143,18 @@ class _ReaderScreenState extends State<ReaderScreen>
     _fetch();
   }
 
+  /// Whether the tap zones are shown, briefly, after a book opens.
+  bool _tapZonesShown = false;
+  Timer? _tapZonesTimer;
+
+  void _showTapZones() {
+    _tapZonesShown = true;
+    _tapZonesTimer?.cancel();
+    _tapZonesTimer = Timer(const Duration(milliseconds: 1600), () {
+      if (mounted) setState(() => _tapZonesShown = false);
+    });
+  }
+
   /// A newer place in this book read on another device, offered with a Go
   /// button until the reader turns a page here.
   ReadingProgress? _elsewhere;
@@ -233,6 +245,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _sessionTimer?.cancel();
+    _tapZonesTimer?.cancel();
     _session
       ..tick(listening: _readAloud.playing)
       ..end();
@@ -254,7 +267,7 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   double? _brightness;
   bool? _awake;
-  late ReaderTheme _theme = services.settings.theme;
+  late Paper _paper = services.settings.paper;
   late bool _spread = services.settings.spread;
 
   /// Brightness and keep-awake from the reading settings, sent only when
@@ -270,8 +283,8 @@ class _ReaderScreenState extends State<ReaderScreen>
       PlatformBridge.instance.keepScreenOn(_awake!);
     }
     // The page colour and the two-page layout are drawn here.
-    if (settings.theme != _theme || settings.spread != _spread) {
-      _theme = settings.theme;
+    if (settings.paper != _paper || settings.spread != _spread) {
+      _paper = settings.paper;
       _spread = settings.spread;
       if (mounted) setState(() {});
     }
@@ -548,6 +561,19 @@ class _ReaderScreenState extends State<ReaderScreen>
             builder: (context, _) => Stack(
               children: [
                 Positioned.fill(child: _buildBody(spread)),
+                if (!_isPdf)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: AnimatedOpacity(
+                        opacity: _tapZonesShown ? 1 : 0,
+                        duration: const Duration(milliseconds: 400),
+                        child: TapZonesHint(
+                          zones: services.settings.tapZones,
+                          ink: services.settings.paper.text,
+                        ),
+                      ),
+                    ),
+                  ),
                 if (_controls || _readAloud.active)
                   Positioned(top: 0, left: 0, right: 0, child: _buildTopBar()),
                 if (_elsewhere case final theirs?
@@ -617,11 +643,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
   }
 
-  Color _background() => switch (services.settings.theme) {
-    ReaderTheme.light => const Color(0xFFFBF9F4),
-    ReaderTheme.sepia => const Color(0xFFF4ECD8),
-    ReaderTheme.dark => const Color(0xFF1B1A18),
-  };
+  Color _background() => services.settings.paper.page;
 
   Widget _buildBody(bool spread) {
     if (_error != null) return _Notice('Could not open this book.\n$_error');
@@ -741,6 +763,7 @@ class _ReaderScreenState extends State<ReaderScreen>
           _title = services.meta.titleOf(book);
           _toc = toc;
           _controls = false;
+          _showTapZones();
           SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
         }),
         onError: (message) {
@@ -757,7 +780,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// Floating controls tinted like the page, in light or dark to match the
   /// reading theme.
   Widget _chrome(Widget child) {
-    final dark = services.settings.theme == ReaderTheme.dark;
+    final dark = services.settings.paper.dark;
     final base = Theme.of(context);
     if (dark == (base.brightness == Brightness.dark)) return child;
     return Theme(
