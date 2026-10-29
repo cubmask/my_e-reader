@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../core/platform_bridge.dart';
+import 'paper_editor.dart';
 import 'reader_settings.dart';
 
-/// Reading appearance: theme, typography, layout and screen.
+/// Reading appearance: paper, typography, layout and screen.
 ///
 /// Sliders apply when let go, since restyling lays the chapter out again;
 /// brightness follows the finger.
@@ -48,15 +49,7 @@ class _AppearanceSheetState extends State<AppearanceSheet> {
           controller: widget.scroll,
           padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
           children: [
-            SegmentedButton<ReaderTheme>(
-              segments: const [
-                ButtonSegment(value: ReaderTheme.light, label: Text('Light')),
-                ButtonSegment(value: ReaderTheme.sepia, label: Text('Sepia')),
-                ButtonSegment(value: ReaderTheme.dark, label: Text('Dark')),
-              ],
-              selected: {settings.theme},
-              onSelectionChanged: (s) => settings.setTheme(s.first),
-            ),
+            PaperPicker(settings: settings),
             if (PlatformBridge.instance.available) ...[
               heading('Brightness'),
               Row(
@@ -150,6 +143,15 @@ class _AppearanceSheetState extends State<AppearanceSheet> {
                 title: const Text('Scroll instead of turning pages'),
                 value: settings.scrolled,
                 onChanged: settings.setScrolled,
+              ),
+              heading('Tap to turn pages'),
+              SegmentedButton<TapZones>(
+                segments: [
+                  for (final z in TapZones.values)
+                    ButtonSegment(value: z, label: Text(z.label)),
+                ],
+                selected: {settings.tapZones},
+                onSelectionChanged: (s) => settings.setTapZones(s.first),
               ),
             ],
             SwitchListTile(

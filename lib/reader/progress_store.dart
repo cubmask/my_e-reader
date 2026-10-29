@@ -10,6 +10,9 @@ class ReadingProgress {
     required this.location,
     required this.fraction,
     required this.updatedAt,
+    this.chapter = '',
+    this.device = '',
+    this.deviceName = '',
   });
 
   /// An EPUB CFI for reflowable books, or a page number for PDFs.
@@ -19,10 +22,31 @@ class ReadingProgress {
   final double fraction;
   final DateTime updatedAt;
 
+  /// The chapter at [location], when known.
+  final String chapter;
+
+  /// The id of the device that read to here, and its name for people, such
+  /// as "Galaxy Tab S9 Ultra". Empty in entries from before they were kept.
+  final String device;
+  final String deviceName;
+
+  ReadingProgress copyWith({String? device, String? deviceName}) =>
+      ReadingProgress(
+        location: location,
+        fraction: fraction,
+        updatedAt: updatedAt,
+        chapter: chapter,
+        device: device ?? this.device,
+        deviceName: deviceName ?? this.deviceName,
+      );
+
   Map<String, Object> toJson() => {
     'location': location,
     'fraction': fraction,
     'updatedAt': updatedAt.toUtc().toIso8601String(),
+    if (chapter.isNotEmpty) 'chapter': chapter,
+    if (device.isNotEmpty) 'device': device,
+    if (deviceName.isNotEmpty) 'deviceName': deviceName,
   };
 
   static ReadingProgress? fromJson(Object? json) {
@@ -37,6 +61,9 @@ class ReadingProgress {
       location: location,
       fraction: fraction.toDouble(),
       updatedAt: updatedAt,
+      chapter: '${json['chapter'] ?? ''}',
+      device: '${json['device'] ?? ''}',
+      deviceName: '${json['deviceName'] ?? ''}',
     );
   }
 }
@@ -56,10 +83,12 @@ Map<String, ReadingProgress> mergeProgress(
   return merged;
 }
 
-Map<String, ReadingProgress> decodeProgress(String text) {
+/// Decodes the books in a progress file, or with [own] this device's own
+/// places, which only the local copy keeps.
+Map<String, ReadingProgress> decodeProgress(String text, {bool own = false}) {
   final json = jsonDecode(text);
   if (json is! Map) return {};
-  final books = json['books'];
+  final books = json[own ? 'own' : 'books'];
   if (books is! Map) return {};
   return {
     for (final MapEntry(:key, :value) in books.entries)
@@ -67,9 +96,14 @@ Map<String, ReadingProgress> decodeProgress(String text) {
   };
 }
 
-String encodeProgress(Map<String, ReadingProgress> progress) => jsonEncode({
+String encodeProgress(
+  Map<String, ReadingProgress> progress, {
+  Map<String, ReadingProgress>? own,
+}) => jsonEncode({
   'version': 1,
   'books': {for (final e in progress.entries) e.key: e.value.toJson()},
+  if (own != null)
+    'own': {for (final e in own.entries) e.key: e.value.toJson()},
 });
 
 /// Stores the synced copy of reading progress.
@@ -79,22 +113,54 @@ abstract interface class ProgressRemote {
 }
 
 /// Reading progress, kept in a local file and synced to Drive's hidden app
-/// data folder so every device resumes at the same place.
+/// data folder.
+///
+/// Each device also remembers its own place in every book, so a book opens
+/// where it was left on this device and a newer place read elsewhere is
+/// offered (see [elsewhere]) rather than jumped to.
 class ProgressStore {
-  ProgressStore(this._localFile, this._remote);
+  ProgressStore(
+    this._localFile,
+    this._remote, {
+    this.device = '',
+    this.deviceName = '',
+  });
 
   final File _localFile;
   final ProgressRemote? _remote;
+
+  /// This device's id and its name for people.
+  final String device;
+  final String deviceName;
   Map<String, ReadingProgress> _progress = {};
+  Map<String, ReadingProgress> _own = {};
   Timer? _pushTimer;
 
+  /// The newest place in the book, read on any device.
   ReadingProgress? operator [](String driveFileId) => _progress[driveFileId];
+
+  /// Where the book was left on this device.
+  ReadingProgress? ownOf(String driveFileId) => _own[driveFileId];
+
+  /// A place read on another device more recently than on this one, when
+  /// it differs from this device's.
+  ReadingProgress? elsewhere(String driveFileId) {
+    final theirs = _progress[driveFileId];
+    final ours = _own[driveFileId];
+    if (theirs == null || ours == null) return null;
+    if (theirs.device.isEmpty || theirs.device == device) return null;
+    if (!theirs.updatedAt.isAfter(ours.updatedAt)) return null;
+    if (theirs.location == ours.location) return null;
+    return theirs;
+  }
 
   /// Loads the local copy, then merges in the remote one.
   Future<void> load() async {
     if (await _localFile.exists()) {
       try {
-        _progress = decodeProgress(await _localFile.readAsString());
+        final text = await _localFile.readAsString();
+        _progress = decodeProgress(text);
+        _own = decodeProgress(text, own: true);
       } on FormatException {
         _progress = {};
       }
@@ -121,7 +187,9 @@ class ProgressStore {
   /// Records progress now and pushes it to Drive a few seconds later, so a
   /// burst of page turns becomes one upload.
   Future<void> save(String driveFileId, ReadingProgress progress) async {
+    progress = progress.copyWith(device: device, deviceName: deviceName);
     _progress[driveFileId] = progress;
+    _own[driveFileId] = progress;
     await _saveLocal();
     _pushTimer?.cancel();
     _pushTimer = Timer(const Duration(seconds: 5), sync);
@@ -137,7 +205,7 @@ class ProgressStore {
 
   Future<void> _saveLocal() async {
     await _localFile.parent.create(recursive: true);
-    await _localFile.writeAsString(encodeProgress(_progress));
+    await _localFile.writeAsString(encodeProgress(_progress, own: _own));
   }
 }
 

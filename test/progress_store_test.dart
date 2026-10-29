@@ -74,4 +74,48 @@ void main() {
     await store.flush();
     expect(decodeProgress(remote.contents!)['a']!.location, 'cfi');
   });
+
+  test('a newer place read on another device is offered, not used', () async {
+    final dir = await Directory.systemTemp.createTemp('progress');
+    addTearDown(() => dir.delete(recursive: true));
+    final remote = _MemoryRemote();
+    final tablet = ProgressStore(
+      File('${dir.path}/tablet.json'),
+      remote,
+      device: 'tab',
+      deviceName: 'Galaxy Tab',
+    );
+    final phone = ProgressStore(
+      File('${dir.path}/phone.json'),
+      remote,
+      device: 'ph',
+      deviceName: 'Pixel',
+    );
+    await tablet.save('a', _p('cfi-10', 10));
+    await tablet.flush();
+    await phone.load();
+    expect(phone.ownOf('a'), isNull);
+    expect(phone.elsewhere('a'), isNull);
+    expect(phone['a']!.deviceName, 'Galaxy Tab');
+
+    await phone.save('a', _p('cfi-40', 40));
+    await phone.flush();
+    await tablet.sync();
+    expect(tablet.ownOf('a')!.location, 'cfi-10');
+    expect(tablet['a']!.location, 'cfi-40');
+    expect(tablet.elsewhere('a')!.deviceName, 'Pixel');
+
+    await tablet.save('a', _p('cfi-12', 50));
+    expect(tablet.elsewhere('a'), isNull);
+
+    // The own places survive a restart, and stay off the synced copy.
+    final again = ProgressStore(
+      File('${dir.path}/tablet.json'),
+      null,
+      device: 'tab',
+    );
+    await again.load();
+    expect(again.ownOf('a')!.location, 'cfi-12');
+    expect(remote.contents, isNot(contains('"own"')));
+  });
 }

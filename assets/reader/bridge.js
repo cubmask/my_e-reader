@@ -27,11 +27,18 @@ let style = {
     justify: true, gap: '6%', flow: 'paginated',
 }
 let searchRun = 0
+// 'sides' or 'topBottom': where a tap turns the page.
+let tapZones = 'sides'
+
+// A paper of the reader's own, or the theme's.
+const colors = () => style.paper
+    ? { bg: style.paper.bg, fg: style.paper.fg, link: style.paper.fg, dark: style.paper.dark }
+    : { ...(themes[style.theme] ?? themes.light), dark: style.theme === 'dark' }
 
 const css = () => {
-    const t = themes[style.theme] ?? themes.light
+    const t = colors()
     return `
-    html { color-scheme: ${style.theme === 'dark' ? 'dark' : 'light'}; }
+    html { color-scheme: ${t.dark ? 'dark' : 'light'}; }
     html, body { background: ${t.bg} !important; color: ${t.fg} !important;
         font-size: ${style.fontSize}% !important; }
     a:link, a:visited { color: ${t.link} !important; }
@@ -45,7 +52,7 @@ const css = () => {
 // Applies the style to the renderer: CSS inside the book, plus the layout
 // attributes foliate-js reads.
 const applyStyle = () => {
-    document.documentElement.style.setProperty('--bg', themes[style.theme].bg)
+    document.documentElement.style.setProperty('--bg', colors().bg)
     if (!view) return
     view.renderer.setAttribute('gap', style.gap)
     view.renderer.setAttribute('flow', style.flow)
@@ -128,7 +135,8 @@ const sendCover = async () => {
     send('cover', url.slice(url.indexOf(',') + 1))
 }
 
-// Left/right thirds turn pages, the middle toggles the app's controls.
+// The outer thirds turn pages (left and right, or top and bottom), the
+// middle toggles the app's controls.
 const handleTap = e => {
     if (e.target.closest?.('a[href]')) return
     const doc = e.target.ownerDocument ?? document
@@ -139,8 +147,13 @@ const handleTap = e => {
     const rect = frame?.getBoundingClientRect()
     const scale = rect ? rect.width / doc.defaultView.innerWidth : 1
     const x = (rect?.left ?? 0) + e.clientX * scale
-    const width = window.innerWidth
-    if (x < width / 3) view.goLeft()
+    const y = (rect?.top ?? 0) + e.clientY * scale
+    const width = window.innerWidth, height = window.innerHeight
+    if (tapZones === 'topBottom') {
+        if (y < height / 3) view.prev()
+        else if (y > height * 2 / 3) view.next()
+        else send('toggleControls')
+    } else if (x < width / 3) view.goLeft()
     else if (x > width * 2 / 3) view.goRight()
     else send('toggleControls')
 }
@@ -190,10 +203,11 @@ const highlightSpoken = range => {
 const initTTS = () => view.initTTS('sentence', highlightSpoken)
 
 window.reader = {
-    async open({ url, name, lastLocation, columns, style: style_, annotations: annotations_ }) {
+    async open({ url, name, lastLocation, columns, style: style_, annotations: annotations_, tapZones: zones }) {
         try {
             style = { ...style, ...style_ }
-            document.documentElement.style.setProperty('--bg', themes[style.theme].bg)
+            tapZones = zones ?? tapZones
+            document.documentElement.style.setProperty('--bg', colors().bg)
             const blob = await (await fetch(url)).blob()
             const book = await makeBook(blob, name)
             view = document.createElement('foliate-view')
@@ -326,6 +340,21 @@ window.reader = {
     clearSearch() {
         searchRun = -1
         view?.clearSearch()
+    },
+    setTapZones: zones => { tapZones = zones },
+    // The text around the reading position, for a question about the page:
+    // up to [before] characters before it and [after] from it on, within
+    // its section.
+    pageContext({ before, after }) {
+        const range = view?.lastLocation?.range
+        if (!range) return null
+        const doc = range.startContainer.ownerDocument
+        const lead = doc.createRange()
+        lead.setStart(doc.body, 0)
+        lead.setEnd(range.startContainer, range.startOffset)
+        const at = lead.toString().length
+        const text = doc.body.textContent ?? ''
+        return text.slice(Math.max(0, at - before), at + after)
     },
     setColumns: n => view?.renderer.setAttribute('max-column-count', String(n)),
     setStyle(next) {

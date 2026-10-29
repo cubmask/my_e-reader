@@ -98,6 +98,10 @@ class PlatformBridge {
       }) ??
       false;
 
+  /// The device's name as its owner set it, such as "Galaxy Tab S9 Ultra",
+  /// or else its model.
+  Future<String?> deviceName() => _call<String>('deviceName');
+
   /// Hands [text] to the Google Translate app; false when it isn't
   /// installed.
   Future<bool> translate(String text) async =>

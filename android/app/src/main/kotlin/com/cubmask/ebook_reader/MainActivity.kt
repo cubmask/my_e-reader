@@ -5,10 +5,12 @@ import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.view.WindowManager
 import androidx.core.content.FileProvider
 import com.ryanheise.audioservice.AudioServiceActivity
@@ -21,7 +23,8 @@ import java.io.File
 //
 // Also answers the app's "ebook_reader/platform" channel: screen brightness
 // and keep-awake while reading, picking books to add, books opened or shared
-// from other apps, sharing and saving files, and handing text to Translate.
+// from other apps, sharing and saving files, handing text to Translate, and
+// the device's name.
 class MainActivity : AudioServiceActivity() {
     private var channel: MethodChannel? = null
     private val main = Handler(Looper.getMainLooper())
@@ -111,6 +114,12 @@ class MainActivity : AudioServiceActivity() {
                     putExtra(Intent.EXTRA_TITLE, call.argument<String>("name") ?: file.name)
                 }
                 startActivityForResult(save, SAVE)
+            }
+            "deviceName" -> {
+                // The name set under About tablet, which Samsung fills in
+                // with the model's marketing name.
+                val name = Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME)
+                result.success(name?.takeIf { it.isNotBlank() } ?: Build.MODEL)
             }
             "translate" -> {
                 // Google Translate takes selected text from any app this way.

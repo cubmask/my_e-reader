@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,11 +14,13 @@ import '../library/book_health.dart' show ProblemKind;
 import '../library/cover_store.dart' show CoverKind;
 import '../library/reading_stats.dart';
 import '../notes/annotation_store.dart';
+import '../ui/ask_sheet.dart';
 import '../ui/breakpoints.dart';
 import '../ui/export_sheet.dart';
 import '../ui/theme.dart';
 import '../ui/voice_settings.dart';
 import 'appearance_sheet.dart';
+import 'ask.dart';
 import 'book_cache.dart';
 import 'book_search.dart';
 import 'ink_layer.dart';
@@ -127,9 +130,13 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
     services.settings.addListener(_applyScreen);
     _applyScreen();
-    final saved = services.progress[book.driveFileId];
+    // This device's own place; a newer one from elsewhere is only offered.
+    final saved =
+        services.progress.ownOf(book.driveFileId) ??
+        services.progress[book.driveFileId];
     _fraction = saved?.fraction ?? 0;
     _location = widget.openAt ?? saved?.location ?? '';
+    if (widget.openAt == null) _checkElsewhere();
     if (services.cache.canStreamDirectly(book)) {
       services.server
           .driveUrl(book.driveFileId)
@@ -137,6 +144,45 @@ class _ReaderScreenState extends State<ReaderScreen>
       return;
     }
     _fetch();
+  }
+
+  /// Whether the tap zones are shown, briefly, after a book opens.
+  bool _tapZonesShown = false;
+  Timer? _tapZonesTimer;
+
+  void _showTapZones() {
+    _tapZonesShown = true;
+    _tapZonesTimer?.cancel();
+    _tapZonesTimer = Timer(const Duration(milliseconds: 1600), () {
+      if (mounted) setState(() => _tapZonesShown = false);
+    });
+  }
+
+  /// A newer place in this book read on another device, offered with a Go
+  /// button until the reader turns a page here.
+  ReadingProgress? _elsewhere;
+  String _elsewhereFrom = '';
+
+  Future<void> _checkElsewhere() async {
+    await services.progress.sync();
+    final theirs = services.progress.elsewhere(book.driveFileId);
+    if (theirs == null || !mounted) return;
+    setState(() {
+      _elsewhere = theirs;
+      _elsewhereFrom = _location;
+    });
+  }
+
+  void _goElsewhere() {
+    final theirs = _elsewhere;
+    if (theirs == null) return;
+    setState(() => _elsewhere = null);
+    if (theirs.location.startsWith('page:')) {
+      final page = int.tryParse(theirs.location.substring(5));
+      if (page != null && _pdf.isReady) _pdf.goToPage(pageNumber: page);
+    } else {
+      _web.goTo(theirs.location);
+    }
   }
 
   /// Opens a local copy, fetching the whole book from Drive if needed.
@@ -202,6 +248,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _sessionTimer?.cancel();
+    _tapZonesTimer?.cancel();
     _session
       ..tick(listening: _readAloud.playing)
       ..end();
@@ -223,7 +270,7 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   double? _brightness;
   bool? _awake;
-  late ReaderTheme _theme = services.settings.theme;
+  late Paper _paper = services.settings.paper;
   late bool _spread = services.settings.spread;
 
   /// Brightness and keep-awake from the reading settings, sent only when
@@ -239,8 +286,8 @@ class _ReaderScreenState extends State<ReaderScreen>
       PlatformBridge.instance.keepScreenOn(_awake!);
     }
     // The page colour and the two-page layout are drawn here.
-    if (settings.theme != _theme || settings.spread != _spread) {
-      _theme = settings.theme;
+    if (settings.paper != _paper || settings.spread != _spread) {
+      _paper = settings.paper;
       _spread = settings.spread;
       if (mounted) setState(() {});
     }
@@ -258,6 +305,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     setState(() {
       _fraction = fraction;
       _location = location;
+      if (location != _elsewhereFrom) _elsewhere = null;
     });
     services.progress.save(
       book.driveFileId,
@@ -265,6 +313,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         location: location,
         fraction: fraction,
         updatedAt: DateTime.now(),
+        chapter: _chapter,
       ),
     );
   }
@@ -511,12 +560,51 @@ class _ReaderScreenState extends State<ReaderScreen>
               box.maxWidth > box.maxHeight &&
               box.maxWidth >= Breakpoints.expanded;
           return ListenableBuilder(
-            listenable: Listenable.merge([_readAloud, _ink, ?services.voices]),
+            listenable: Listenable.merge([
+              _readAloud,
+              _ink,
+              ?services.voices,
+              ?services.ask,
+            ]),
             builder: (context, _) => Stack(
               children: [
                 Positioned.fill(child: _buildBody(spread)),
+                if (!_isPdf)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: AnimatedOpacity(
+                        opacity: _tapZonesShown ? 1 : 0,
+                        duration: const Duration(milliseconds: 400),
+                        child: TapZonesHint(
+                          zones: services.settings.tapZones,
+                          ink: services.settings.paper.text,
+                        ),
+                      ),
+                    ),
+                  ),
                 if (_controls || _readAloud.active)
                   Positioned(top: 0, left: 0, right: 0, child: _buildTopBar()),
+                if (_elsewhere case final theirs?
+                    when _ready &&
+                        theirs.location.startsWith('page:') == _isPdf)
+                  Positioned(
+                    top: _controls || _readAloud.active ? 84 : 12,
+                    left: 16,
+                    right: 16,
+                    child: SafeArea(
+                      bottom: false,
+                      child: Center(
+                        child: _chrome(
+                          ElsewhereBanner(
+                            progress: theirs,
+                            paper: _background(),
+                            onGo: _goElsewhere,
+                            onDismiss: () => setState(() => _elsewhere = null),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 if (_ink.enabled)
                   Positioned(
                     bottom: 24,
@@ -563,11 +651,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
   }
 
-  Color _background() => switch (services.settings.theme) {
-    ReaderTheme.light => const Color(0xFFFBF9F4),
-    ReaderTheme.sepia => const Color(0xFFF4ECD8),
-    ReaderTheme.dark => const Color(0xFF1B1A18),
-  };
+  Color _background() => services.settings.paper.page;
 
   Widget _buildBody(bool spread) {
     if (_error != null) return _Notice('Could not open this book.\n$_error');
@@ -687,6 +771,7 @@ class _ReaderScreenState extends State<ReaderScreen>
           _title = services.meta.titleOf(book);
           _toc = toc;
           _controls = false;
+          _showTapZones();
           SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
         }),
         onError: (message) {
@@ -703,7 +788,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// Floating controls tinted like the page, in light or dark to match the
   /// reading theme.
   Widget _chrome(Widget child) {
-    final dark = services.settings.theme == ReaderTheme.dark;
+    final dark = services.settings.paper.dark;
     final base = Theme.of(context);
     if (dark == (base.brightness == Brightness.dark)) return child;
     return Theme(
@@ -811,6 +896,13 @@ class _ReaderScreenState extends State<ReaderScreen>
         },
         onHighlight: _highlight,
         onNote: _highlightWithNote,
+        onAsk: services.ask?.ready ?? false
+            ? () {
+                _clearSelection();
+                setState(() => _selection = null);
+                _showAsk(selection: selection.text);
+              }
+            : null,
         onLookUp: () => showModalBottomSheet<void>(
           context: context,
           isScrollControlled: true,
@@ -871,6 +963,12 @@ class _ReaderScreenState extends State<ReaderScreen>
             selected: _readAloud.active,
             onPressed: _toggleReadAloud,
           ),
+          if (services.ask?.ready ?? false)
+            ToolbarItem(
+              icon: Icons.question_answer_outlined,
+              tooltip: 'Ask about this page',
+              onPressed: () => _showAsk(),
+            ),
           ToolbarItem(
             icon: Icons.sticky_note_2_outlined,
             tooltip: 'Notes and highlights',
@@ -1052,6 +1150,61 @@ class _ReaderScreenState extends State<ReaderScreen>
                 },
               ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// The text around the reading position for a question: the current
+  /// page and the next in a PDF (two pages either side for a chapter), or
+  /// the words around the position in a book.
+  Future<String> _passage(AskContext context) async {
+    final chapter = context == AskContext.chapter;
+    if (!_isPdf) {
+      return await _web.pageContext(
+            before: chapter ? 12000 : 1500,
+            after: chapter ? 4000 : 3000,
+          ) ??
+          '';
+    }
+    if (!_pdf.isReady) return '';
+    final page = _pdf.pageNumber ?? 1;
+    final pages = <String>[];
+    for (
+      var p = math.max(1, page - (chapter ? 2 : 0));
+      p <= math.min(_pdf.pageCount, page + (chapter ? 2 : 1));
+      p++
+    ) {
+      final text = await _pdf.document.pages[p - 1].loadStructuredText();
+      pages.add('[Page $p]\n${text.fullText.trim()}');
+    }
+    return pages.join('\n\n');
+  }
+
+  void _showAsk({String? selection}) {
+    final ask = services.ask;
+    if (ask == null) return;
+    final where = _isPdf
+        ? 'page ${_pdf.isReady ? _pdf.pageNumber : 1}'
+              '${_pdf.isReady ? ' of ${_pdf.pageCount}' : ''}'
+        : '${(_fraction * 100).round()}% through the book';
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        maxChildSize: 0.95,
+        builder: (context, scroll) => AskSheet(
+          settings: ask,
+          client: services.askClient,
+          title: _title,
+          author: services.meta.authorOf(book),
+          where: _chapter.isEmpty ? where : '"$_chapter", $where',
+          passage: _passage,
+          selection: selection,
+          scroll: scroll,
         ),
       ),
     );
