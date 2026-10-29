@@ -22,6 +22,7 @@ import '../library/new_books.dart';
 import '../library/reading_stats.dart';
 import '../notes/annotation_store.dart';
 import '../notes/ink_store.dart';
+import 'ask.dart';
 import 'book_cache.dart';
 import 'lookup.dart';
 import 'progress_store.dart';
@@ -49,7 +50,10 @@ class ReaderServices {
     ReadingStats? stats,
     this.uploader,
     this.converter,
-  }) : duplicates = duplicates ?? DuplicateAlerts(),
+    this.ask,
+    AskClient? askClient,
+  }) : askClient = askClient ?? AskClient(http.Client()),
+       duplicates = duplicates ?? DuplicateAlerts(),
        health = health ?? BookHealth(null, null),
        lookup = lookup ?? LookupService(http.Client()),
        stats = stats ?? ReadingStats(null, null, device: 'test');
@@ -83,6 +87,10 @@ class ReaderServices {
 
   /// Books the reader added to Drive, for the library to list at once.
   final added = ValueNotifier<Book?>(null);
+
+  /// The model that answers questions about the page, when set up.
+  final AskSettings? ask;
+  final AskClient askClient;
 
   /// Offline voices for reading aloud; the system voices when null.
   final VoiceStore? voices;
@@ -169,6 +177,7 @@ class ReaderServices {
       ),
       uploader: BookUploader(api),
       converter: BookConverter(api),
+      ask: AskSettings(),
     );
     await Future.wait([
       services.progress.load(),
@@ -184,6 +193,7 @@ class ReaderServices {
       services.settings.load(),
       services.voices!.load(),
       services.stats.load(),
+      services.ask!.load(),
     ]);
     return services;
   }

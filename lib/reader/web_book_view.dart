@@ -56,6 +56,18 @@ class WebBookController {
 
   Future<void> clearSelection() => _run('window.reader.clearSelection()');
 
+  /// The text around the reading position, within its section.
+  Future<String?> pageContext({required int before, required int after}) async {
+    final result = await _web?.callAsyncJavaScript(
+      functionBody: 'return window.reader.pageContext(a)',
+      arguments: {
+        'a': {'before': before, 'after': after},
+      },
+    );
+    final value = result?.value;
+    return value is String ? value : null;
+  }
+
   /// Searches the book; matches arrive through [WebBookSearch].
   late final search = WebBookSearch(this);
 

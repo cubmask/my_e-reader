@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../library/library_controller.dart';
 import '../library/metadata_updater.dart';
 import '../reader/book_cache.dart';
+import '../reader/reader_services.dart';
+import 'ask_settings.dart';
 import 'book_health_screen.dart';
 import 'duplicates_screen.dart';
 import 'library_screen.dart' show largeTitle;
@@ -72,6 +74,11 @@ class SettingsScreen extends StatelessWidget {
             ),
           if (controller.services?.voices case final voices?)
             VoiceSettings(voices: voices),
+          if (controller.services case ReaderServices(
+            :final ask?,
+            :final askClient,
+          ))
+            AskSettingsSection(settings: ask, client: askClient),
           if (controller.services?.cache case final cache?)
             _StorageSection(cache: cache),
           if (controller.status != LibraryStatus.signedOut)

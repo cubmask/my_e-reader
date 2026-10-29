@@ -342,6 +342,20 @@ window.reader = {
         view?.clearSearch()
     },
     setTapZones: zones => { tapZones = zones },
+    // The text around the reading position, for a question about the page:
+    // up to [before] characters before it and [after] from it on, within
+    // its section.
+    pageContext({ before, after }) {
+        const range = view?.lastLocation?.range
+        if (!range) return null
+        const doc = range.startContainer.ownerDocument
+        const lead = doc.createRange()
+        lead.setStart(doc.body, 0)
+        lead.setEnd(range.startContainer, range.startOffset)
+        const at = lead.toString().length
+        const text = doc.body.textContent ?? ''
+        return text.slice(Math.max(0, at - before), at + after)
+    },
     setColumns: n => view?.renderer.setAttribute('max-column-count', String(n)),
     setStyle(next) {
         style = { ...style, ...next }

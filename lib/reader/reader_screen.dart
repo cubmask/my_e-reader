@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,11 +14,13 @@ import '../library/book_health.dart' show ProblemKind;
 import '../library/cover_store.dart' show CoverKind;
 import '../library/reading_stats.dart';
 import '../notes/annotation_store.dart';
+import '../ui/ask_sheet.dart';
 import '../ui/breakpoints.dart';
 import '../ui/export_sheet.dart';
 import '../ui/theme.dart';
 import '../ui/voice_settings.dart';
 import 'appearance_sheet.dart';
+import 'ask.dart';
 import 'book_cache.dart';
 import 'book_search.dart';
 import 'ink_layer.dart';
@@ -557,7 +560,12 @@ class _ReaderScreenState extends State<ReaderScreen>
               box.maxWidth > box.maxHeight &&
               box.maxWidth >= Breakpoints.expanded;
           return ListenableBuilder(
-            listenable: Listenable.merge([_readAloud, _ink, ?services.voices]),
+            listenable: Listenable.merge([
+              _readAloud,
+              _ink,
+              ?services.voices,
+              ?services.ask,
+            ]),
             builder: (context, _) => Stack(
               children: [
                 Positioned.fill(child: _buildBody(spread)),
@@ -888,6 +896,13 @@ class _ReaderScreenState extends State<ReaderScreen>
         },
         onHighlight: _highlight,
         onNote: _highlightWithNote,
+        onAsk: services.ask?.ready ?? false
+            ? () {
+                _clearSelection();
+                setState(() => _selection = null);
+                _showAsk(selection: selection.text);
+              }
+            : null,
         onLookUp: () => showModalBottomSheet<void>(
           context: context,
           isScrollControlled: true,
@@ -948,6 +963,12 @@ class _ReaderScreenState extends State<ReaderScreen>
             selected: _readAloud.active,
             onPressed: _toggleReadAloud,
           ),
+          if (services.ask?.ready ?? false)
+            ToolbarItem(
+              icon: Icons.question_answer_outlined,
+              tooltip: 'Ask about this page',
+              onPressed: () => _showAsk(),
+            ),
           ToolbarItem(
             icon: Icons.sticky_note_2_outlined,
             tooltip: 'Notes and highlights',
@@ -1129,6 +1150,61 @@ class _ReaderScreenState extends State<ReaderScreen>
                 },
               ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// The text around the reading position for a question: the current
+  /// page and the next in a PDF (two pages either side for a chapter), or
+  /// the words around the position in a book.
+  Future<String> _passage(AskContext context) async {
+    final chapter = context == AskContext.chapter;
+    if (!_isPdf) {
+      return await _web.pageContext(
+            before: chapter ? 12000 : 1500,
+            after: chapter ? 4000 : 3000,
+          ) ??
+          '';
+    }
+    if (!_pdf.isReady) return '';
+    final page = _pdf.pageNumber ?? 1;
+    final pages = <String>[];
+    for (
+      var p = math.max(1, page - (chapter ? 2 : 0));
+      p <= math.min(_pdf.pageCount, page + (chapter ? 2 : 1));
+      p++
+    ) {
+      final text = await _pdf.document.pages[p - 1].loadStructuredText();
+      pages.add('[Page $p]\n${text.fullText.trim()}');
+    }
+    return pages.join('\n\n');
+  }
+
+  void _showAsk({String? selection}) {
+    final ask = services.ask;
+    if (ask == null) return;
+    final where = _isPdf
+        ? 'page ${_pdf.isReady ? _pdf.pageNumber : 1}'
+              '${_pdf.isReady ? ' of ${_pdf.pageCount}' : ''}'
+        : '${(_fraction * 100).round()}% through the book';
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        maxChildSize: 0.95,
+        builder: (context, scroll) => AskSheet(
+          settings: ask,
+          client: services.askClient,
+          title: _title,
+          author: services.meta.authorOf(book),
+          where: _chapter.isEmpty ? where : '"$_chapter", $where',
+          passage: _passage,
+          selection: selection,
+          scroll: scroll,
         ),
       ),
     );

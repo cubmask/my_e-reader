@@ -152,7 +152,7 @@ class RoundToolButton extends StatelessWidget {
   }
 }
 
-/// The popover over selected text: copy, look up, share, read aloud,
+/// The popover over selected text: copy, look up, share, ask, read aloud,
 /// highlight colours and a note.
 class SelectionPopover extends StatelessWidget {
   const SelectionPopover({
@@ -164,10 +164,12 @@ class SelectionPopover extends StatelessWidget {
     required this.onNote,
     this.onLookUp,
     this.onShare,
+    this.onAsk,
   });
 
   final Color paper;
   final VoidCallback onCopy;
+  final VoidCallback? onAsk;
   final VoidCallback? onLookUp;
   final VoidCallback? onShare;
   final VoidCallback onReadAloud;
@@ -207,6 +209,15 @@ class SelectionPopover extends StatelessWidget {
                 icon: Icons.share_outlined,
                 tooltip: 'Share',
                 onPressed: onShare,
+              ),
+            ),
+          if (onAsk != null)
+            RoundToolButton(
+              ink: ink,
+              item: ToolbarItem(
+                icon: Icons.question_answer_outlined,
+                tooltip: 'Ask about this',
+                onPressed: onAsk,
               ),
             ),
           RoundToolButton(
