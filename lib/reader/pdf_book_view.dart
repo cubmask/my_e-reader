@@ -8,6 +8,7 @@ import '../notes/ink_store.dart';
 import 'ink_layer.dart';
 import 'pdf_errors.dart';
 import 'pdf_highlights.dart';
+import 'pdf_speech.dart';
 import 'pdf_spread.dart';
 import 'read_aloud.dart';
 
@@ -210,26 +211,52 @@ class _PdfBookViewState extends State<PdfBookView> {
 }
 
 /// Reads a PDF aloud page by page, turning pages as it goes.
+///
+/// Running heads, page numbers, footnotes, reference marks and web
+/// addresses are skipped, and a sentence that runs onto the next page is
+/// read in one piece with that page.
 class PdfSpeechSource implements SpeechSource {
   PdfSpeechSource(this._controller);
 
   final PdfViewerController _controller;
   int _page = 1;
 
+  /// The start of a sentence the previous page broke off.
+  String _carry = '';
+
   @override
   String? get language => null;
 
   Future<List<SpeechSegment>?> _read(int page) async {
-    if (!_controller.isReady || page > _controller.pageCount) return null;
+    if (!_controller.isReady || page > _controller.pageCount) {
+      if (_carry.isEmpty) return null;
+      final rest = sentencesOf(_carry);
+      _carry = '';
+      return rest;
+    }
     _page = page;
     await _controller.goToPage(pageNumber: page);
-    final text = await _controller.document.pages[page - 1]
-        .loadStructuredText();
-    return sentencesOf(text.fullText);
+    final pdfPage = _controller.document.pages[page - 1];
+    final text = await pdfPage.loadStructuredText();
+    final lines = pdfLines(text.fullText, text.charRects);
+    final words = speakable(
+      lines.isEmpty ? text.fullText : readablePdfText(lines, pdfPage.height),
+    );
+    final sentences = sentencesOf('$_carry $words');
+    _carry = '';
+    if (page < _controller.pageCount &&
+        sentences.isNotEmpty &&
+        !RegExp(r'[.!?…。！？]["”’」)\]]*$').hasMatch(sentences.last.text)) {
+      _carry = sentences.removeLast().text;
+    }
+    return sentences;
   }
 
   @override
-  Future<List<SpeechSegment>?> start() => _read(_controller.pageNumber ?? 1);
+  Future<List<SpeechSegment>?> start() {
+    _carry = '';
+    return _read(_controller.pageNumber ?? 1);
+  }
 
   @override
   Future<List<SpeechSegment>?> next() => _read(_page + 1);

@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/platform_bridge.dart';
 import '../library/book.dart';
 import '../library/book_health.dart';
 import '../library/book_meta_store.dart';
@@ -98,8 +99,23 @@ class ReaderServices {
     return id;
   }
 
+  /// What to call this device when another one offers its reading place.
+  static Future<String> _deviceName() async {
+    if (await PlatformBridge.instance.deviceName() case final name?) {
+      return name;
+    }
+    return switch (Platform.operatingSystem) {
+      'ios' => 'iPhone or iPad',
+      'macos' => 'Mac',
+      'windows' => 'Windows PC',
+      'linux' => 'Linux PC',
+      _ => 'another device',
+    };
+  }
+
   static Future<ReaderServices> create(http.Client client) async {
     final api = drive.DriveApi(client);
+    final device = await _deviceId();
     final dir = await getApplicationSupportDirectory();
     // Blocks of PDFs streamed in an earlier session; their URLs change with
     // every launch, so they are never reused.
@@ -119,6 +135,8 @@ class ReaderServices {
       progress: ProgressStore(
         File(p.join(dir.path, 'progress.json')),
         DriveAppDataRemote(api, 'progress.json'),
+        device: device,
+        deviceName: await _deviceName(),
       ),
       annotations: AnnotationStore(
         File(p.join(dir.path, 'annotations.json')),
@@ -147,7 +165,7 @@ class ReaderServices {
       stats: ReadingStats(
         File(p.join(dir.path, 'stats.json')),
         DriveAppDataRemote(api, 'stats.json'),
-        device: await _deviceId(),
+        device: device,
       ),
       uploader: BookUploader(api),
       converter: BookConverter(api),

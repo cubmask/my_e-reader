@@ -3,6 +3,7 @@ import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 
 import '../notes/annotation_store.dart';
+import 'progress_store.dart';
 import '../ui/theme.dart';
 
 /// Highlight colours as drawn on the page and in lists.
@@ -249,6 +250,85 @@ class SelectionPopover extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Offers the place in the book last read on another device, such as "Read
+/// on Galaxy S24 · 2 h ago", with a button to go there.
+class ElsewhereBanner extends StatelessWidget {
+  const ElsewhereBanner({
+    super.key,
+    required this.progress,
+    required this.paper,
+    required this.onGo,
+    required this.onDismiss,
+  });
+
+  final ReadingProgress progress;
+  final Color paper;
+  final VoidCallback onGo;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final p = progress;
+    final where = p.location.startsWith('page:')
+        ? 'Page ${p.location.substring(5)}'
+        : '${(p.fraction * 100).round()}%';
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 560),
+      child: FloatingPill(
+        paper: paper,
+        padding: const EdgeInsets.fromLTRB(20, 6, 6, 6),
+        child: Row(
+          children: [
+            const Icon(Icons.devices_outlined, size: 22),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Read on ${p.deviceName.isEmpty ? 'another device' : p.deviceName}'
+                    ' · ${timeAgo(p.updatedAt)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall,
+                  ),
+                  Text(
+                    [if (p.chapter.isNotEmpty) p.chapter, where].join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            FilledButton(onPressed: onGo, child: const Text('Go')),
+            IconButton(
+              tooltip: 'Stay here',
+              icon: const Icon(Icons.close),
+              onPressed: onDismiss,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// How long ago [time] was, such as "5 min ago" or "yesterday".
+String timeAgo(DateTime time, {DateTime? now}) {
+  final age = (now ?? DateTime.now()).difference(time);
+  if (age.inMinutes < 1) return 'just now';
+  if (age.inHours < 1) return '${age.inMinutes} min ago';
+  if (age.inDays < 1) return '${age.inHours} h ago';
+  if (age.inDays == 1) return 'yesterday';
+  return '${age.inDays} days ago';
 }
 
 Color _inkOn(Color paper) =>

@@ -127,9 +127,13 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
     services.settings.addListener(_applyScreen);
     _applyScreen();
-    final saved = services.progress[book.driveFileId];
+    // This device's own place; a newer one from elsewhere is only offered.
+    final saved =
+        services.progress.ownOf(book.driveFileId) ??
+        services.progress[book.driveFileId];
     _fraction = saved?.fraction ?? 0;
     _location = widget.openAt ?? saved?.location ?? '';
+    if (widget.openAt == null) _checkElsewhere();
     if (services.cache.canStreamDirectly(book)) {
       services.server
           .driveUrl(book.driveFileId)
@@ -137,6 +141,33 @@ class _ReaderScreenState extends State<ReaderScreen>
       return;
     }
     _fetch();
+  }
+
+  /// A newer place in this book read on another device, offered with a Go
+  /// button until the reader turns a page here.
+  ReadingProgress? _elsewhere;
+  String _elsewhereFrom = '';
+
+  Future<void> _checkElsewhere() async {
+    await services.progress.sync();
+    final theirs = services.progress.elsewhere(book.driveFileId);
+    if (theirs == null || !mounted) return;
+    setState(() {
+      _elsewhere = theirs;
+      _elsewhereFrom = _location;
+    });
+  }
+
+  void _goElsewhere() {
+    final theirs = _elsewhere;
+    if (theirs == null) return;
+    setState(() => _elsewhere = null);
+    if (theirs.location.startsWith('page:')) {
+      final page = int.tryParse(theirs.location.substring(5));
+      if (page != null && _pdf.isReady) _pdf.goToPage(pageNumber: page);
+    } else {
+      _web.goTo(theirs.location);
+    }
   }
 
   /// Opens a local copy, fetching the whole book from Drive if needed.
@@ -258,6 +289,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     setState(() {
       _fraction = fraction;
       _location = location;
+      if (location != _elsewhereFrom) _elsewhere = null;
     });
     services.progress.save(
       book.driveFileId,
@@ -265,6 +297,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         location: location,
         fraction: fraction,
         updatedAt: DateTime.now(),
+        chapter: _chapter,
       ),
     );
   }
@@ -517,6 +550,27 @@ class _ReaderScreenState extends State<ReaderScreen>
                 Positioned.fill(child: _buildBody(spread)),
                 if (_controls || _readAloud.active)
                   Positioned(top: 0, left: 0, right: 0, child: _buildTopBar()),
+                if (_elsewhere case final theirs?
+                    when _ready &&
+                        theirs.location.startsWith('page:') == _isPdf)
+                  Positioned(
+                    top: _controls || _readAloud.active ? 84 : 12,
+                    left: 16,
+                    right: 16,
+                    child: SafeArea(
+                      bottom: false,
+                      child: Center(
+                        child: _chrome(
+                          ElsewhereBanner(
+                            progress: theirs,
+                            paper: _background(),
+                            onGo: _goElsewhere,
+                            onDismiss: () => setState(() => _elsewhere = null),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
                 if (_ink.enabled)
                   Positioned(
                     bottom: 24,
