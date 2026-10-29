@@ -32,7 +32,18 @@ jobs:
         with:
           channel: stable
           cache: true
-      - run: flutter build apk --debug
+      # The CI runner makes a fresh debug keystore each run, so its SHA-1
+      # would never match the Android OAuth client. Restore a fixed one.
+      - name: Restore debug keystore
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        if: env.DEBUG_KEYSTORE_BASE64 != ''
+        run: |
+          mkdir -p ~/.android
+          echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > ~/.android/debug.keystore
+      - run: >-
+          flutter build apk --debug
+          --dart-define=GOOGLE_WEB_CLIENT_ID=${{ vars.GOOGLE_WEB_CLIENT_ID }}
       - uses: actions/upload-artifact@v4
         with:
           name: my-e-reader-debug-apk
