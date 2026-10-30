@@ -101,7 +101,7 @@ flutter run --dart-define=GOOGLE_WEB_CLIENT_ID=<web-client-id>.apps.googleuserco
 Every CI run also uploads a debug APK you can install directly on the tablet. For Google sign-in to work in that APK, set these once under the repository's **Settings → Secrets and variables → Actions**:
 
 - Variable `GOOGLE_WEB_CLIENT_ID`: the Web application client id.
-- Secret `DEBUG_KEYSTORE_BASE64`: your debug keystore, from `base64 -w0 ~/.android/debug.keystore`. CI otherwise signs with a new key each run, whose SHA-1 never matches the Android client. Register this keystore's SHA-1 (`keytool -list -v -keystore ~/.android/debug.keystore -storepass android`) on the Android client.
+- Secret `DEBUG_KEYSTORE_BASE64`: your debug keystore, from `base64 -i ~/.android/debug.keystore` on a Mac (`base64 -w0 ~/.android/debug.keystore` on Linux). CI otherwise signs with a new key each run, whose SHA-1 never matches the Android client. Register this keystore's SHA-1 (`keytool -list -v -keystore ~/.android/debug.keystore -storepass android`) on the Android client.
 
 On first launch, sign in and paste the link to your books folder
 (`https://drive.google.com/drive/folders/...`).
