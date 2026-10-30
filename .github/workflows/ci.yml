@@ -44,6 +44,13 @@ jobs:
       - run: >-
           flutter build apk --debug
           --dart-define=GOOGLE_WEB_CLIENT_ID=${{ vars.GOOGLE_WEB_CLIENT_ID }}
+      # Compare this with the SHA-1 on the Android OAuth client in Google
+      # Cloud; a mismatch makes sign-in fail with error 28444.
+      - name: Print APK signing certificate
+        run: |
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify --print-certs build/app/outputs/flutter-apk/app-debug.apk | grep -i 'SHA-1' || true
+          keytool -list -v -keystore ~/.android/debug.keystore -storepass android | grep 'SHA1:' || true
       - uses: actions/upload-artifact@v4
         with:
           name: my-e-reader-debug-apk
