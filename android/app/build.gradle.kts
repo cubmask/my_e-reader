@@ -29,6 +29,20 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        // CI restores a fixed debug keystore and points here, so the APK's
+        // SHA-1 matches the Android OAuth client. The runner's default
+        // debug key is new each run and not where ~/.android suggests.
+        System.getenv("DEBUG_KEYSTORE_PATH")?.let { path ->
+            getByName("debug") {
+                storeFile = file(path)
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.

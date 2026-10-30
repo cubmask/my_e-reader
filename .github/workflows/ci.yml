@@ -39,11 +39,12 @@ jobs:
           DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         if: env.DEBUG_KEYSTORE_BASE64 != ''
         run: |
-          mkdir -p ~/.android
-          printf %s "$DEBUG_KEYSTORE_BASE64" | tr -d "[:space:]" | base64 -d > ~/.android/debug.keystore || {
+          keystore="$RUNNER_TEMP/debug.keystore"
+          printf %s "$DEBUG_KEYSTORE_BASE64" | tr -d "[:space:]" | base64 -d > "$keystore" || {
             echo "::error::DEBUG_KEYSTORE_BASE64 is not valid base64. Set it to the output of: base64 -i ~/.android/debug.keystore"
             exit 1
           }
+          echo "DEBUG_KEYSTORE_PATH=$keystore" >> "$GITHUB_ENV"
       - run: >-
           flutter build apk --debug
           --dart-define=GOOGLE_WEB_CLIENT_ID=${{ vars.GOOGLE_WEB_CLIENT_ID }}
@@ -53,7 +54,9 @@ jobs:
         run: |
           apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
           "$apksigner" verify --print-certs build/app/outputs/flutter-apk/app-debug.apk | grep -i 'SHA-1' || true
-          keytool -list -v -keystore ~/.android/debug.keystore -storepass android | grep 'SHA1:' || true
+          if [ -n "${DEBUG_KEYSTORE_PATH:-}" ]; then
+            keytool -list -v -keystore "$DEBUG_KEYSTORE_PATH" -storepass android | grep 'SHA1:' || true
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: my-e-reader-debug-apk
