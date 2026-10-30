@@ -35,6 +35,11 @@ class MobileDriveAuth implements DriveAuth {
 
   @override
   Future<http.Client> signIn() async {
+    if (Platform.isAndroid && _serverClientId.isEmpty) {
+      throw StateError(
+        'Build with --dart-define=GOOGLE_WEB_CLIENT_ID=... (see README).',
+      );
+    }
     final signIn = GoogleSignIn.instance;
     if (!_initialized) {
       await signIn.initialize(
