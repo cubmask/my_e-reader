@@ -40,7 +40,7 @@ jobs:
         if: env.DEBUG_KEYSTORE_BASE64 != ''
         run: |
           mkdir -p ~/.android
-          echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > ~/.android/debug.keystore
+          printf %s "$DEBUG_KEYSTORE_BASE64" | tr -d "[:space:]" | base64 -d > ~/.android/debug.keystore
       - run: >-
           flutter build apk --debug
           --dart-define=GOOGLE_WEB_CLIENT_ID=${{ vars.GOOGLE_WEB_CLIENT_ID }}
