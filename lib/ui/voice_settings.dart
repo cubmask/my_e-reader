@@ -217,7 +217,7 @@ class _VoiceSettingsState extends State<VoiceSettings> {
   }
 }
 
-/// ElevenLabs or Fish Audio, with the reader's own API key.
+/// ElevenLabs, Fish Audio or Azure, with the reader's own API key.
 class _OnlineVoices extends StatelessWidget {
   const _OnlineVoices({required this.voices, this.onPreview});
 
@@ -278,6 +278,7 @@ class _OnlineVoices extends StatelessWidget {
           provider,
           cloud.keyFor(provider)!,
           search: search,
+          region: cloud.modelFor(provider),
         ),
       ),
     );
@@ -298,20 +299,24 @@ class _OnlineVoices extends StatelessWidget {
             'Studio-quality voices while connected; the offline voice takes '
             'over without a connection. The text being read is sent to the '
             'service and billed to your account (a novel is roughly 500,000 '
-            'characters).',
+            'characters; Azure gives 500,000 free each month).',
           ),
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: SegmentedButton<CloudProvider?>(
-            showSelectedIcon: false,
-            segments: [
-              const ButtonSegment(value: null, label: Text('Off')),
-              for (final p in CloudProvider.values)
-                ButtonSegment(value: p, label: Text(p.label)),
-            ],
-            selected: {provider},
-            onSelectionChanged: (v) => cloud.setProvider(v.first),
+          // Scrolls rather than overflowing on a narrow phone.
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SegmentedButton<CloudProvider?>(
+              showSelectedIcon: false,
+              segments: [
+                const ButtonSegment(value: null, label: Text('Off')),
+                for (final p in CloudProvider.values)
+                  ButtonSegment(value: p, label: Text(p.label)),
+              ],
+              selected: {provider},
+              onSelectionChanged: (v) => cloud.setProvider(v.first),
+            ),
           ),
         ),
         if (provider != null) ...[
@@ -330,7 +335,7 @@ class _OnlineVoices extends StatelessWidget {
           ),
           ListTile(
             leading: const Icon(Icons.tune),
-            title: const Text('Model'),
+            title: Text(provider.modelLabel),
             trailing: DropdownButton<String>(
               value: cloud.modelFor(provider),
               underline: const SizedBox(),
@@ -346,9 +351,11 @@ class _OnlineVoices extends StatelessWidget {
             title: const Text('Voice'),
             subtitle: Text(
               cloud.voiceFor(provider)?.name ??
-                  (provider == CloudProvider.fishAudio
-                      ? 'Fish Audio\'s default voice'
-                      : 'Pick a voice to start'),
+                  switch (provider) {
+                    CloudProvider.fishAudio => 'Fish Audio\'s default voice',
+                    CloudProvider.azure => 'Emma (Multilingual), the default',
+                    CloudProvider.elevenLabs => 'Pick a voice to start',
+                  },
             ),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
