@@ -24,15 +24,48 @@ enum CloudProvider {
   fishAudio('Fish Audio', 'https://fish.audio/app/api-keys/', [
     (id: 'drama-3', name: 'Drama 3 (most expressive)'),
     (id: 's2.1-pro', name: 'S2.1 Pro'),
-  ]);
+  ]),
 
-  const CloudProvider(this.label, this.keysUrl, this.models);
+  /// Microsoft's neural voices, the ones Edge reads aloud with. A key
+  /// belongs to the region its Speech resource was made in.
+  azure(
+    'Azure',
+    'https://portal.azure.com/#create/Microsoft.CognitiveServicesSpeechServices',
+    [
+      (id: 'eastus', name: 'East US'),
+      (id: 'eastus2', name: 'East US 2'),
+      (id: 'westus2', name: 'West US 2'),
+      (id: 'canadacentral', name: 'Canada Central'),
+      (id: 'westeurope', name: 'West Europe'),
+      (id: 'northeurope', name: 'North Europe'),
+      (id: 'uksouth', name: 'UK South'),
+      (id: 'francecentral', name: 'France Central'),
+      (id: 'germanywestcentral', name: 'Germany West Central'),
+      (id: 'centralindia', name: 'Central India'),
+      (id: 'southeastasia', name: 'Southeast Asia'),
+      (id: 'japaneast', name: 'Japan East'),
+      (id: 'australiaeast', name: 'Australia East'),
+    ],
+    modelLabel: 'Region',
+  );
+
+  const CloudProvider(
+    this.label,
+    this.keysUrl,
+    this.models, {
+    this.modelLabel = 'Model',
+  });
 
   final String label;
 
   /// Where the reader creates an API key.
   final String keysUrl;
+
+  /// Models, or for Azure the regions a key can belong to.
   final List<CloudModel> models;
+
+  /// What [models] are called in settings.
+  final String modelLabel;
 }
 
 /// A voice offered by a provider.
@@ -59,7 +92,7 @@ class CloudVoiceException implements Exception {
   String toString() => message;
 }
 
-/// Talks to ElevenLabs and Fish Audio.
+/// Talks to ElevenLabs, Fish Audio and Azure.
 class CloudTtsClient {
   CloudTtsClient(this._http, {this.timeout = const Duration(seconds: 20)});
 
@@ -73,7 +106,15 @@ class CloudTtsClient {
       switch (provider) {
         CloudProvider.elevenLabs => {'xi-api-key': key},
         CloudProvider.fishAudio => {'Authorization': 'Bearer $key'},
+        CloudProvider.azure => {'Ocp-Apim-Subscription-Key': key},
       };
+
+  static Uri _azure(String region, String path) =>
+      Uri.https('$region.tts.speech.microsoft.com', '/cognitiveservices$path');
+
+  /// The voice Azure reads with until one is picked; it speaks most
+  /// languages.
+  static const azureDefaultVoice = 'en-US-EmmaMultilingualNeural';
 
   Future<http.Response> _send(Future<http.Response> request) async {
     final http.Response response;
@@ -89,6 +130,7 @@ class CloudTtsClient {
     if (response.statusCode == 200) return response;
     throw CloudVoiceException(switch (response.statusCode) {
       401 || 403 => 'The API key was refused',
+      404 => 'The service was not found; check the region',
       402 => 'The account is out of credits',
       429 => 'Too many requests; try again shortly',
       final code => 'The voice service failed ($code${_reason(response)})',
@@ -107,13 +149,45 @@ class CloudTtsClient {
   }
 
   /// The voices the key can use: the account's own first, then the
-  /// provider's library, optionally filtered by [search].
+  /// provider's library, optionally filtered by [search]. Azure lists
+  /// the voices of [region], multilingual ones first.
   Future<List<CloudVoice>> voices(
     CloudProvider provider,
     String key, {
     String search = '',
+    String region = '',
   }) async {
     switch (provider) {
+      case CloudProvider.azure:
+        final response = await _send(
+          _http.get(
+            _azure(region, '/voices/list'),
+            headers: _auth(provider, key),
+          ),
+        );
+        final body = jsonDecode(utf8.decode(response.bodyBytes));
+        final query = search.toLowerCase();
+        final found = [
+          for (final v in body is List ? body : const [])
+            if (v is Map && v['ShortName'] is String)
+              CloudVoice(
+                v['ShortName'] as String,
+                '${v['DisplayName'] ?? v['ShortName']}',
+                details: [
+                  v['LocaleName'] ?? v['Locale'],
+                  v['Gender'],
+                ].whereType<String>().join(' · '),
+              ),
+        ];
+        int rank(CloudVoice v) => v.id.contains('Multilingual') ? 0 : 1;
+        return [
+          for (final v in found)
+            if ('${v.id} ${v.name} ${v.details}'.toLowerCase().contains(query))
+              v,
+        ]..sort(
+          (a, b) =>
+              rank(a) != rank(b) ? rank(a) - rank(b) : a.id.compareTo(b.id),
+        );
       case CloudProvider.elevenLabs:
         final response = await _send(
           _http.get(
@@ -172,6 +246,28 @@ class CloudTtsClient {
         final ids = {for (final v in own) v.id};
         return [...own, ...library.where((v) => !ids.contains(v.id))];
     }
+  }
+
+  /// [text] as SSML for an Azure [voice], at [speed] times the normal rate.
+  static String azureSsml(
+    String text, {
+    required String voice,
+    required double speed,
+  }) {
+    final escaped = text
+        // XML forbids most control characters.
+        .replaceAll(RegExp(r'[\x00-\x08\x0B\x0C\x0E-\x1F]'), ' ')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;');
+    final percent = ((speed - 1) * 100).round().clamp(-50, 100);
+    final rate = '${percent >= 0 ? '+' : ''}$percent%';
+    // The locale only matters for voices that speak one language.
+    final locale =
+        RegExp(r'^[a-z]{2,3}-[A-Z]{2}').stringMatch(voice) ?? 'en-US';
+    return "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' "
+        "xml:lang='$locale'><voice name='$voice'>"
+        "<prosody rate='$rate'>$escaped</prosody></voice></speak>";
   }
 
   /// ElevenLabs models that refused the surrounding sentences, which are
@@ -244,6 +340,22 @@ class CloudTtsClient {
 
     final response = switch (provider) {
       CloudProvider.elevenLabs => await elevenWithContext(),
+      CloudProvider.azure => await _send(
+        _http.post(
+          _azure(model, '/v1'),
+          headers: {
+            ..._auth(provider, key),
+            'Content-Type': 'application/ssml+xml',
+            'X-Microsoft-OutputFormat': 'audio-24khz-96kbitrate-mono-mp3',
+            'User-Agent': 'ebook_reader',
+          },
+          body: azureSsml(
+            text,
+            voice: voice.isEmpty ? azureDefaultVoice : voice,
+            speed: speed,
+          ),
+        ),
+      ),
       CloudProvider.fishAudio => await _send(
         _http.post(
           _fish.replace(path: '/v1/tts'),
@@ -434,8 +546,8 @@ class CloudVoiceSettings extends ChangeNotifier {
   bool get ready {
     final provider = _provider;
     if (provider == null || !hasKey(provider)) return false;
-    // Fish Audio has a default voice; ElevenLabs needs one picked.
-    return provider == CloudProvider.fishAudio || voiceFor(provider) != null;
+    // Fish Audio and Azure have a default voice; ElevenLabs needs one.
+    return provider != CloudProvider.elevenLabs || voiceFor(provider) != null;
   }
 
   static String _secret(CloudProvider p) => 'voices.cloud.${p.name}.apiKey';

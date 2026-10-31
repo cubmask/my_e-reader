@@ -184,6 +184,138 @@ void main() {
     });
   });
 
+  group('Azure', () {
+    test('speaks SSML in the region with the key', () async {
+      late http.Request sent;
+      final client = CloudTtsClient(
+        MockClient((request) async {
+          sent = request;
+          return http.Response.bytes([4, 5], 200);
+        }),
+      );
+      final audio = await client.speak(
+        CloudProvider.azure,
+        'az-key',
+        text: 'Tom & Jerry <3',
+        model: 'westeurope',
+        voice: 'de-DE-SeraphinaMultilingualNeural',
+        language: 'de',
+        speed: 1.25,
+      );
+      expect(audio, [4, 5]);
+      expect(
+        sent.url.toString(),
+        'https://westeurope.tts.speech.microsoft.com/cognitiveservices/v1',
+      );
+      expect(sent.headers['Ocp-Apim-Subscription-Key'], 'az-key');
+      expect(
+        sent.headers['X-Microsoft-OutputFormat'],
+        'audio-24khz-96kbitrate-mono-mp3',
+      );
+      expect(
+        sent.body,
+        "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' "
+        "xml:lang='de-DE'><voice name='de-DE-SeraphinaMultilingualNeural'>"
+        "<prosody rate='+25%'>Tom &amp; Jerry &lt;3</prosody></voice></speak>",
+      );
+    });
+
+    test('cleans the text and keeps the rate in Azure\'s range', () {
+      expect(
+        CloudTtsClient.azureSsml('Hi\u0007.', voice: 'en-US-X', speed: 0.2),
+        contains("<prosody rate='-50%'>Hi .</prosody>"),
+      );
+      expect(
+        CloudTtsClient.azureSsml('Hi', voice: 'x', speed: 1),
+        contains("xml:lang='en-US'><voice name='x'><prosody rate='+0%'>"),
+      );
+    });
+
+    test('uses the default voice when none is set', () async {
+      late http.Request sent;
+      final client = CloudTtsClient(
+        MockClient((request) async {
+          sent = request;
+          return http.Response.bytes([1], 200);
+        }),
+      );
+      await client.speak(
+        CloudProvider.azure,
+        'k',
+        text: 'Hi',
+        model: 'eastus',
+        voice: '',
+        language: 'en',
+        speed: 1,
+      );
+      expect(sent.body, contains("name='${CloudTtsClient.azureDefaultVoice}'"));
+    });
+
+    test('lists the region\'s voices, multilingual first', () async {
+      late http.Request sent;
+      Map<String, String> voice(String id, String name, String locale) => {
+        'ShortName': id,
+        'DisplayName': name,
+        'LocaleName': locale,
+        'Gender': 'Female',
+      };
+      final client = CloudTtsClient(
+        MockClient((request) async {
+          sent = request;
+          return http.Response(
+            jsonEncode([
+              voice('en-GB-SoniaNeural', 'Sonia', 'English (UK)'),
+              voice(
+                'en-US-AvaMultilingualNeural',
+                'Ava Multilingual',
+                'English (US)',
+              ),
+              voice('de-DE-KatjaNeural', 'Katja', 'German (Germany)'),
+            ]),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          );
+        }),
+      );
+      final voices = await client.voices(
+        CloudProvider.azure,
+        'k',
+        region: 'uksouth',
+      );
+      expect(
+        sent.url.toString(),
+        'https://uksouth.tts.speech.microsoft.com/cognitiveservices/voices/list',
+      );
+      expect(sent.headers['Ocp-Apim-Subscription-Key'], 'k');
+      expect(voices.map((v) => v.name), ['Ava Multilingual', 'Katja', 'Sonia']);
+      expect(voices.last.details, 'English (UK) · Female');
+
+      final german = await client.voices(
+        CloudProvider.azure,
+        'k',
+        search: 'german',
+        region: 'uksouth',
+      );
+      expect(german.map((v) => v.id), ['de-DE-KatjaNeural']);
+    });
+
+    test('points at the region when the service is not found', () async {
+      final client = CloudTtsClient(
+        MockClient((_) async => http.Response('', 404)),
+      );
+      await expectLater(
+        client.voices(CloudProvider.azure, 'k', region: 'nowhere'),
+        throwsA(
+          isA<CloudVoiceException>().having(
+            (e) => e.message,
+            'message',
+            'The service was not found; check the region',
+          ),
+        ),
+      );
+    });
+  });
+
   test('explains refusals and lost connections', () async {
     Future<String> failure(Future<http.Response> Function() respond) async {
       final client = CloudTtsClient(MockClient((_) => respond()));
@@ -268,6 +400,12 @@ void main() {
     expect(again.ready, isTrue);
     await again.setKey(CloudProvider.fishAudio, '');
     expect(again.ready, isFalse);
+
+    await again.setProvider(CloudProvider.azure);
+    expect(again.ready, isFalse, reason: 'Azure needs a key');
+    await again.setKey(CloudProvider.azure, 'a');
+    expect(again.ready, isTrue, reason: 'Azure has a default voice');
+    expect(again.modelFor(CloudProvider.azure), 'eastus');
   });
 
   _stitchingAndCache();
