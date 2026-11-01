@@ -192,6 +192,57 @@ void main() {
     expect(engine.spoken, ['One.', 'Two.']);
   });
 
+  test('skipping back says the previous sentence again', () async {
+    final engine = _FakeEngine()..gate = Completer<void>();
+    final reader = ReadAloud(voices: _FakeVoices(engine));
+    final done = reader.play(
+      _Source([
+        [
+          const SpeechSegment('One.'),
+          const SpeechSegment('Two.'),
+          const SpeechSegment('Three.'),
+        ],
+      ]),
+    );
+    await _settle();
+    await engine.stop();
+    await _settle();
+    expect(engine.spoken, ['One.', 'Two.']);
+
+    await reader.skipBack();
+    await _settle();
+    expect(engine.spoken, ['One.', 'Two.', 'One.']);
+    // At the first sentence it starts that one again.
+    await reader.skipBack();
+    await _settle();
+    engine.gate = null;
+    await engine.stop();
+    await done;
+    expect(engine.spoken, ['One.', 'Two.', 'One.', 'One.', 'Two.', 'Three.']);
+  });
+
+  test('skipping back while paused takes effect on resume', () async {
+    final engine = _FakeEngine(canPause: true)..gate = Completer<void>();
+    final reader = ReadAloud(voices: _FakeVoices(engine));
+    final done = reader.play(
+      _Source([
+        [const SpeechSegment('One.'), const SpeechSegment('Two.')],
+      ]),
+    );
+    await _settle();
+    await engine.stop();
+    await _settle();
+    await reader.pause();
+    await reader.skipBack();
+    await _settle();
+    expect(engine.spoken, ['One.', 'Two.']);
+
+    engine.gate = null;
+    await reader.resume();
+    await done;
+    expect(engine.spoken, ['One.', 'Two.', 'One.', 'Two.']);
+  });
+
   test('stop while paused ends reading', () async {
     final engine = _FakeEngine()..gate = Completer<void>();
     final reader = ReadAloud(voices: _FakeVoices(engine));

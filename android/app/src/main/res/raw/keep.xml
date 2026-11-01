@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Read aloud's car buttons name these icons only from Dart, so resource
+     shrinking can't see that they're used. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_car_speed,@drawable/ic_car_sleep,@drawable/audio_service_*" />
