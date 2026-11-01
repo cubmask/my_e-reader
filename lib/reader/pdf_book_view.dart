@@ -227,14 +227,11 @@ class PdfSpeechSource implements SpeechSource {
 
   /// Reads a PDF that may not be on screen, such as one started in the car.
   PdfSpeechSource.pages({
-    required int Function() pageCount,
+    required this._pageCount,
     required PdfPage Function(int number) page,
-    required int Function() startPage,
-    required Future<void> Function(int number) turnTo,
-  }) : _pageCount = pageCount,
-       _pageOf = page,
-       _startPage = startPage,
-       _turnTo = turnTo;
+    required this._startPage,
+    required this._turnTo,
+  }) : _pageOf = page;
 
   final int Function() _pageCount;
   final PdfPage Function(int number) _pageOf;
