@@ -74,6 +74,9 @@ class ReadAloud extends ChangeNotifier {
 
   /// Set when a pause had to stop the sentence, which is then said again.
   bool _repeat = false;
+
+  /// Set by [skipBack] until the reading loop has stepped back.
+  bool _back = false;
   Completer<void>? _resumed;
 
   Timer? _sleepTimer;
@@ -168,7 +171,8 @@ class ReadAloud extends ChangeNotifier {
       ];
       String? textAt(int i) => i < segments.length ? segments[i].text : null;
       Future<List<SpeechSegment>?>? upcoming;
-      for (var i = 0; i < segments.length; i++) {
+      var i = 0;
+      while (i < segments.length) {
         if (run != _run) return;
         final segment = segments[i];
         source.onSegment(segment);
@@ -179,7 +183,7 @@ class ReadAloud extends ChangeNotifier {
           ));
         } else {
           // Fetch the next block while the last sentence plays.
-          upcoming = source.next().then((next) {
+          upcoming ??= source.next().then((next) {
             final texts = [
               for (final s in next ?? const <SpeechSegment>[])
                 if (s.text.trim().isNotEmpty) s.text,
@@ -197,15 +201,33 @@ class ReadAloud extends ChangeNotifier {
         do {
           if (_resumed case final resumed?) await resumed.future;
           if (run != _run) return;
+          if (_back) break;
           _repeat = false;
           await engine.speak(segment.text, context);
-        } while (_repeat && run == _run);
+        } while (_repeat && !_back && run == _run);
+        if (_back) {
+          _back = false;
+          if (i > 0) i--;
+          previous = i > 0 ? segments[i - 1].text : null;
+          continue;
+        }
         previous = segment.text;
+        i++;
       }
       if (run != _run) return;
       block = await (upcoming ?? source.next());
     }
     if (run == _run) await stop();
+  }
+
+  /// Goes back one sentence; at the start of a block it says the first
+  /// sentence again. Works while paused too.
+  Future<void> skipBack() async {
+    if (!active) return;
+    _back = true;
+    // A pause in place is dropped, so resuming starts the earlier sentence.
+    if (_paused) _repeat = true;
+    await _engine?.stop();
   }
 
   /// Pauses reading; [resume] carries on from the same sentence.
@@ -240,6 +262,7 @@ class ReadAloud extends ChangeNotifier {
     _playing = false;
     _paused = false;
     _repeat = false;
+    _back = false;
     _resumed?.complete();
     _resumed = null;
     notifyListeners();

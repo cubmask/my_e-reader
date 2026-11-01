@@ -514,6 +514,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     final chapter = current?.label ?? '';
     if (chapter != _chapter && _chapter.isNotEmpty) _readAloud.chapterEnded();
     _chapter = chapter;
+    BackgroundAudio.instance.setChapter(_readAloud, chapter);
     final pagesLeft = (nextStart ?? count + 1) - page;
     _chapterMinutes = pagesLeft * services.stats.secondsPerPage / 60;
   }
@@ -535,17 +536,68 @@ class _ReaderScreenState extends State<ReaderScreen>
 
     walk(outline, 0);
     if (mounted && toc.isNotEmpty) setState(() => _toc = toc);
+    if (mounted) _offerToCar();
   }
 
   // Read aloud
 
   Future<void> _toggleReadAloud() async {
     if (_readAloud.active) return _readAloud.stop();
+    await _startReadAloud();
+  }
+
+  Future<void> _startReadAloud() async {
+    if (!_ready || !mounted) return;
     setState(() => _controls = true);
-    await BackgroundAudio.instance.attach(_readAloud, title: _title);
+    await BackgroundAudio.instance.attach(_readAloud, _nowReading());
     await _readAloud.play(
       _isPdf ? PdfSpeechSource(_pdf) : WebSpeechSource(_web),
     );
+  }
+
+  /// This book as the notification, the lock screen and Android Auto show it.
+  NowReading _nowReading() => NowReading(
+    id: book.driveFileId,
+    title: _title,
+    author: services.meta.authorOf(book),
+    cover: services.covers.coverOf(book),
+    chapter: _chapter,
+    byChapter: !_isPdf,
+    start: _startReadAloud,
+    nextChapter: _toc.isEmpty ? null : () => _skipChapter(1),
+    previousChapter: _toc.isEmpty ? null : () => _skipChapter(-1),
+  );
+
+  /// Lets the car start reading this book while it is open.
+  void _offerToCar() {
+    if (mounted) BackgroundAudio.instance.attach(_readAloud, _nowReading());
+  }
+
+  /// Moves to the next or previous chapter, carrying on reading aloud there.
+  Future<void> _skipChapter(int step) async {
+    if (_toc.isEmpty || !mounted) return;
+    final current = _toc.indexWhere((item) => item.label == _chapter);
+    final target = current < 0 ? (step > 0 ? 0 : -1) : current + step;
+    if (target < 0 || target >= _toc.length) return;
+    final reading = _readAloud.active;
+    if (reading) await _readAloud.stop();
+    await _goToTocItem(_toc[target]);
+    if (reading && mounted) {
+      // Lets the view settle on the new page before reading from it.
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      await _startReadAloud();
+    }
+  }
+
+  Future<void> _goToTocItem(TocItem item) async {
+    final page = item.href.startsWith('page:')
+        ? int.tryParse(item.href.substring(5))
+        : null;
+    if (page != null) {
+      await _pdf.goToPage(pageNumber: page);
+    } else {
+      await _web.goTo(item.href);
+    }
   }
 
   @override
@@ -742,6 +794,7 @@ class _ReaderScreenState extends State<ReaderScreen>
             _readAloud.chapterEnded();
           }
           _chapter = chapter;
+          BackgroundAudio.instance.setChapter(_readAloud, chapter);
           if (timeLeft != null) {
             _session.activity(unitsLeft: timeLeft.total);
             _chapterMinutes = timeLeft.section * services.stats.minutesPerUnit;
@@ -755,25 +808,28 @@ class _ReaderScreenState extends State<ReaderScreen>
           final a = annotations.byLocation(book.driveFileId, cfi);
           if (a != null) _openAnnotation(a);
         },
-        onOpened: (title, author, toc) => setState(() {
-          services.health.opened(book);
-          // A converted document's title is its temporary copy's name.
-          if (!book.format.needsConversion) {
-            services.meta.fillIn(
-              book.driveFileId,
-              // Comics and DjVu have no metadata and report the file name.
-              title: title == book.fileName || title == book.displayTitle
-                  ? null
-                  : title,
-              author: author,
-            );
-          }
-          _title = services.meta.titleOf(book);
-          _toc = toc;
-          _controls = false;
-          _showTapZones();
-          SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-        }),
+        onOpened: (title, author, toc) {
+          setState(() {
+            services.health.opened(book);
+            // A converted document's title is its temporary copy's name.
+            if (!book.format.needsConversion) {
+              services.meta.fillIn(
+                book.driveFileId,
+                // Comics and DjVu have no metadata and report the file name.
+                title: title == book.fileName || title == book.displayTitle
+                    ? null
+                    : title,
+                author: author,
+              );
+            }
+            _title = services.meta.titleOf(book);
+            _toc = toc;
+            _controls = false;
+            _showTapZones();
+            SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+          });
+          _offerToCar();
+        },
         onError: (message) {
           services.health.readerFailed(book, message);
           setState(() => _error = message);
@@ -889,7 +945,7 @@ class _ReaderScreenState extends State<ReaderScreen>
             _selection = null;
             _controls = true;
           });
-          await BackgroundAudio.instance.attach(_readAloud, title: _title);
+          await BackgroundAudio.instance.attach(_readAloud, _nowReading());
           await _readAloud.play(
             PassageSpeechSource(selection.text, language: _web.language),
           );
@@ -1139,14 +1195,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                 title: Text(item.label),
                 onTap: () {
                   Navigator.of(context).pop();
-                  final page = item.href.startsWith('page:')
-                      ? int.tryParse(item.href.substring(5))
-                      : null;
-                  if (page != null) {
-                    _pdf.goToPage(pageNumber: page);
-                  } else {
-                    _web.goTo(item.href);
-                  }
+                  _goToTocItem(item);
                 },
               ),
           ],
