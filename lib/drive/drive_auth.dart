@@ -17,7 +17,9 @@ const driveScopes = [
 
 /// Signs the user in to Google and returns an authorised HTTP client.
 abstract interface class DriveAuth {
-  Future<http.Client> signIn();
+  /// Signs in, asking the user when needed. [quietly] never shows anything
+  /// and fails instead, for when the app was started by Android Auto.
+  Future<http.Client> signIn({bool quietly = false});
   Future<void> signOut();
 
   /// google_sign_in on Android, iOS and macOS; browser loopback on Windows,
@@ -34,7 +36,7 @@ class MobileDriveAuth implements DriveAuth {
   bool _initialized = false;
 
   @override
-  Future<http.Client> signIn() async {
+  Future<http.Client> signIn({bool quietly = false}) async {
     if (Platform.isAndroid && _serverClientId.isEmpty) {
       throw StateError(
         'Build with --dart-define=GOOGLE_WEB_CLIENT_ID=... (see README).',
@@ -49,14 +51,17 @@ class MobileDriveAuth implements DriveAuth {
     }
     final account =
         await signIn.attemptLightweightAuthentication() ??
-        await signIn.authenticate(scopeHint: driveScopes);
+        (quietly
+            ? throw const SignInNeeded()
+            : await signIn.authenticate(scopeHint: driveScopes));
     final client = account.authorizationClient;
     final headers = await client.authorizationHeaders(
       driveScopes,
-      promptIfNecessary: true,
+      promptIfNecessary: !quietly,
     );
+    if (headers == null) throw const SignInNeeded();
     return _HeaderClient(
-      headers!,
+      headers,
       () => client.authorizationHeaders(driveScopes),
     );
   }
@@ -75,7 +80,8 @@ class DesktopDriveAuth implements DriveAuth {
   auth.AutoRefreshingAuthClient? _client;
 
   @override
-  Future<http.Client> signIn() async {
+  Future<http.Client> signIn({bool quietly = false}) async {
+    if (quietly && _client == null) throw const SignInNeeded();
     if (_clientId.isEmpty) {
       throw StateError(
         'Build with --dart-define=GOOGLE_DESKTOP_CLIENT_ID=... (see README).',
@@ -93,6 +99,14 @@ class DesktopDriveAuth implements DriveAuth {
     _client?.close();
     _client = null;
   }
+}
+
+/// A quiet sign-in found no account it could use without asking.
+class SignInNeeded implements Exception {
+  const SignInNeeded();
+
+  @override
+  String toString() => 'Sign in to Google first.';
 }
 
 /// Adds Google's authorization headers to each request.

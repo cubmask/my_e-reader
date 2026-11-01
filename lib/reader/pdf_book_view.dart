@@ -216,9 +216,30 @@ class _PdfBookViewState extends State<PdfBookView> {
 /// addresses are skipped, and a sentence that runs onto the next page is
 /// read in one piece with that page.
 class PdfSpeechSource implements SpeechSource {
-  PdfSpeechSource(this._controller);
+  /// Reads the PDF on screen, turning its pages as it goes.
+  PdfSpeechSource(PdfViewerController controller)
+    : this.pages(
+        pageCount: () => controller.isReady ? controller.pageCount : 0,
+        page: (n) => controller.document.pages[n - 1],
+        startPage: () => controller.pageNumber ?? 1,
+        turnTo: (n) => controller.goToPage(pageNumber: n),
+      );
 
-  final PdfViewerController _controller;
+  /// Reads a PDF that may not be on screen, such as one started in the car.
+  PdfSpeechSource.pages({
+    required int Function() pageCount,
+    required PdfPage Function(int number) page,
+    required int Function() startPage,
+    required Future<void> Function(int number) turnTo,
+  }) : _pageCount = pageCount,
+       _pageOf = page,
+       _startPage = startPage,
+       _turnTo = turnTo;
+
+  final int Function() _pageCount;
+  final PdfPage Function(int number) _pageOf;
+  final int Function() _startPage;
+  final Future<void> Function(int number) _turnTo;
   int _page = 1;
 
   /// The start of a sentence the previous page broke off.
@@ -228,15 +249,16 @@ class PdfSpeechSource implements SpeechSource {
   String? get language => null;
 
   Future<List<SpeechSegment>?> _read(int page) async {
-    if (!_controller.isReady || page > _controller.pageCount) {
+    final count = _pageCount();
+    if (page > count) {
       if (_carry.isEmpty) return null;
       final rest = sentencesOf(_carry);
       _carry = '';
       return rest;
     }
     _page = page;
-    await _controller.goToPage(pageNumber: page);
-    final pdfPage = _controller.document.pages[page - 1];
+    await _turnTo(page);
+    final pdfPage = _pageOf(page);
     final text = await pdfPage.loadStructuredText();
     final lines = pdfLines(text.fullText, text.charRects);
     final words = speakable(
@@ -244,7 +266,7 @@ class PdfSpeechSource implements SpeechSource {
     );
     final sentences = sentencesOf('$_carry $words');
     _carry = '';
-    if (page < _controller.pageCount &&
+    if (page < count &&
         sentences.isNotEmpty &&
         !RegExp(r'[.!?…。！？]["”’」)\]]*$').hasMatch(sentences.last.text)) {
       _carry = sentences.removeLast().text;
@@ -255,7 +277,7 @@ class PdfSpeechSource implements SpeechSource {
   @override
   Future<List<SpeechSegment>?> start() {
     _carry = '';
-    return _read(_controller.pageNumber ?? 1);
+    return _read(_startPage());
   }
 
   @override

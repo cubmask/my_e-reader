@@ -8,7 +8,7 @@ import 'package:http/http.dart' as http;
 
 class _FakeAuth implements DriveAuth {
   @override
-  Future<http.Client> signIn() async => http.Client();
+  Future<http.Client> signIn({bool quietly = false}) async => http.Client();
   @override
   Future<void> signOut() async {}
 }
