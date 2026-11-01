@@ -274,7 +274,7 @@ class CarAudioHandler extends BaseAudioHandler {
     switch (parentMediaId) {
       case AudioService.browsableRootId:
       case AudioService.recentRootId:
-        return [if (_item() case final item?) item];
+        return [?_item()];
     }
     return const [];
   }
