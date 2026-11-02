@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -392,5 +393,117 @@ class _WebBookViewState extends State<WebBookView> {
         );
       },
     );
+  }
+}
+
+/// A web book opened in a hidden WebView, for reading aloud with no screen,
+/// such as a book started from Android Auto.
+///
+/// The page is laid out at a fixed size, so foliate-js pages through it and
+/// reports the reading position just as it does on screen.
+class HeadlessWebBook {
+  HeadlessWebBook._(this._view, this.controller);
+
+  final HeadlessInAppWebView _view;
+  final WebBookController controller;
+
+  String title = '';
+  String author = '';
+  List<TocItem> toc = const [];
+
+  /// Opens [file] at [location], reporting each move through [onRelocate].
+  static Future<HeadlessWebBook> open({
+    required File file,
+    required String fileName,
+    required ReaderServer server,
+    required ReaderSettings settings,
+    String? location,
+    required void Function(String cfi, double fraction, String chapter)
+    onRelocate,
+  }) async {
+    final url = await server.serve(file);
+    final controller = WebBookController();
+    final opened = Completer<void>();
+    late final HeadlessWebBook book;
+    final view = HeadlessInAppWebView(
+      initialUrlRequest: URLRequest(url: WebUri.uri(url)),
+      initialSize: const Size(800, 1200),
+      onWebViewCreated: (web) {
+        controller._web = web;
+        web.addJavaScriptHandler(
+          handlerName: 'relocate',
+          callback: (args) {
+            final d = args.first as Map;
+            onRelocate(
+              '${d['cfi']}',
+              (d['fraction'] as num?)?.toDouble() ?? 0,
+              '${d['chapter'] ?? ''}',
+            );
+          },
+        );
+        web.addJavaScriptHandler(
+          handlerName: 'opened',
+          callback: (args) {
+            final d = args.first as Map;
+            final language = '${d['language'] ?? ''}';
+            controller.language = language.isEmpty ? null : language;
+            book
+              ..title = '${d['title'] ?? ''}'
+              ..author = '${d['author'] ?? ''}'
+              ..toc = [
+                for (final item in (d['toc'] as List? ?? const []))
+                  if (item is Map)
+                    TocItem(
+                      '${item['label']}',
+                      '${item['href']}',
+                      (item['depth'] as num?)?.toInt() ?? 0,
+                    ),
+              ];
+            if (!opened.isCompleted) opened.complete();
+          },
+        );
+        web.addJavaScriptHandler(
+          handlerName: 'error',
+          callback: (args) {
+            if (!opened.isCompleted) {
+              opened.completeError(Exception('${args.firstOrNull}'));
+            }
+          },
+        );
+      },
+      onLoadStop: (web, _) {
+        web.callAsyncJavaScript(
+          functionBody: 'await window.reader.open(args)',
+          arguments: {
+            'args': {
+              'url': ReaderServer.bookPath,
+              'name': fileName,
+              'lastLocation': location,
+              'columns': 1,
+              'style': settings.webStyle,
+              'tapZones': settings.tapZones.name,
+              'annotations': const [],
+            },
+          },
+        );
+      },
+    );
+    book = HeadlessWebBook._(view, controller);
+    await view.run();
+    try {
+      await opened.future.timeout(const Duration(seconds: 20));
+    } catch (_) {
+      await view.dispose();
+      rethrow;
+    }
+    return book;
+  }
+
+  /// Reads the book aloud from the current position.
+  SpeechSource speech() => WebSpeechSource(controller);
+
+  Future<void> dispose() async {
+    controller._web = null;
+    await _view.dispose();
   }
 }

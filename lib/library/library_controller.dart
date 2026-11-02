@@ -61,10 +61,21 @@ class LibraryController extends ChangeNotifier {
   /// Book cache, progress and reader settings; set once signed in.
   ReaderServices? get services => _services;
 
-  Future<void> signIn() async {
+  /// Signs in and loads the library. [quietly] is for Android Auto, which
+  /// can start the app with no screen: it never asks the user anything, and
+  /// a failure leaves the app signed out without showing an error.
+  Future<void> signIn({bool quietly = false}) async {
+    if (quietly && _status != LibraryStatus.signedOut) return;
     _set(LibraryStatus.loading);
     try {
-      final client = _client = await _auth.signIn();
+      final http.Client client;
+      try {
+        client = _client = await _auth.signIn(quietly: quietly);
+      } catch (_) {
+        if (!quietly) rethrow;
+        _set(LibraryStatus.signedOut);
+        return;
+      }
       _services = await _servicesFactory(client);
       _services!.cache.addListener(_dropDeleted);
       _services!.added.addListener(_addFromReader);

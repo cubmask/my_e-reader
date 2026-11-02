@@ -570,7 +570,8 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   /// Lets the car start reading this book while it is open.
   void _offerToCar() {
-    if (mounted) BackgroundAudio.instance.attach(_readAloud, _nowReading());
+    if (!mounted) return;
+    BackgroundAudio.instance.attach(_readAloud, _nowReading(), offer: true);
   }
 
   /// Moves to the next or previous chapter, carrying on reading aloud there.

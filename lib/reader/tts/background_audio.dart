@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 
+import '../car/car_library.dart';
+import '../car/car_player.dart';
 import '../read_aloud.dart';
 
 /// The book being read aloud, as the lock screen, the notification and
@@ -18,6 +20,7 @@ class NowReading {
     this.start,
     this.nextChapter,
     this.previousChapter,
+    this.released,
   });
 
   /// The book's Drive file id.
@@ -36,6 +39,9 @@ class NowReading {
   final Future<void> Function()? nextChapter;
   final Future<void> Function()? previousChapter;
 
+  /// Called once another book takes over the media session.
+  final VoidCallback? released;
+
   NowReading copyWith({String? chapter}) => NowReading(
     id: id,
     title: title,
@@ -46,6 +52,7 @@ class NowReading {
     start: start,
     nextChapter: nextChapter,
     previousChapter: previousChapter,
+    released: released,
   );
 }
 
@@ -66,18 +73,25 @@ class BackgroundAudio {
       !kIsWeb && (Platform.isAndroid || Platform.isIOS || Platform.isMacOS);
 
   /// Starts the media service early, so that Android Auto finds it when it
-  /// connects before any book has been opened.
-  Future<void> start() async {
-    if (!supported) return;
-    await (_handler ??= _start());
-  }
-
-  /// Shows [book] as the media of [reader]: offered to the car while the book
-  /// is open, and shown as playing while it is read aloud.
-  Future<void> attach(ReadAloud reader, NowReading book) async {
+  /// connects before any book has been opened. [car] supplies the library
+  /// the car browses.
+  Future<void> start({CarSource? car}) async {
     if (!supported) return;
     final handler = await (_handler ??= _start());
-    handler?.open(reader, book);
+    handler?.car = car;
+  }
+
+  /// Shows [book] as the media of [reader], as playing while it is read
+  /// aloud. An [offer] (a book just opened on screen) doesn't take over from
+  /// another book being read aloud.
+  Future<void> attach(
+    ReadAloud reader,
+    NowReading book, {
+    bool offer = false,
+  }) async {
+    if (!supported) return;
+    final handler = await (_handler ??= _start());
+    handler?.open(reader, book, offer: offer);
   }
 
   /// The chapter shown under the title.
@@ -98,11 +112,12 @@ class BackgroundAudio {
           androidNotificationChannelName: 'Read aloud',
           androidNotificationOngoing: true,
           androidStopForegroundOnPause: true,
-          // Android Auto shows books as covers rather than a plain list.
+          // Books show in the car as covers, folders as a list.
           androidBrowsableRootExtras: {
             'android.media.browse.CONTENT_STYLE_SUPPORTED': true,
             'android.media.browse.CONTENT_STYLE_PLAYABLE_HINT': 2,
             'android.media.browse.CONTENT_STYLE_BROWSABLE_HINT': 1,
+            'android.media.browse.SEARCH_SUPPORTED': true,
           },
         ),
       );
@@ -120,9 +135,22 @@ const carSpeeds = [0.75, 1.0, 1.25, 1.5, 2.0];
 /// 0 waits for the end of the chapter.
 const carSleepSteps = [15, 30, 60, 0];
 
+/// Folders the car shows as tabs.
+const carContinueId = 'continue';
+const carDownloadedId = 'downloaded';
+const carCollectionsId = 'collections';
+const _collectionPrefix = 'collection:';
+const _bookPrefix = 'book:';
+
+/// The media id of a book, as the car plays it.
+String carBookId(String driveFileId) => '$_bookPrefix$driveFileId';
+
 /// Connects read aloud to the media session: the notification, the lock
 /// screen, headset buttons and Android Auto.
 class CarAudioHandler extends BaseAudioHandler {
+  /// The library the car browses; null until the app has started it.
+  CarSource? car;
+
   ReadAloud? _reader;
   NowReading? _book;
 
@@ -132,10 +160,21 @@ class CarAudioHandler extends BaseAudioHandler {
   /// Shown in the car until something plays.
   String? _error;
 
-  void open(ReadAloud reader, NowReading book) {
-    if (_reader != reader) {
-      _reader?.removeListener(_update);
+  /// Set while a book started from the car is opening.
+  bool _loading = false;
+
+  void open(ReadAloud reader, NowReading book, {bool offer = false}) {
+    final previous = _reader;
+    if (offer && previous != null && previous != reader && previous.active) {
+      return;
+    }
+    if (previous != reader) {
+      previous?.removeListener(_update);
+      if (previous?.active ?? false) previous!.stop();
+      final released = _book?.released;
       _reader = reader..addListener(_update);
+      _sleepStep = -1;
+      released?.call();
     }
     _book = book;
     _error = null;
@@ -164,7 +203,7 @@ class CarAudioHandler extends BaseAudioHandler {
     final book = _book;
     if (book == null) return null;
     return MediaItem(
-      id: book.id,
+      id: carBookId(book.id),
       title: book.title,
       artist: book.author.isEmpty ? null : book.author,
       album: book.chapter.isEmpty ? null : book.chapter,
@@ -198,7 +237,7 @@ class CarAudioHandler extends BaseAudioHandler {
           if (playing) MediaControl.pause else MediaControl.play,
           if (book?.nextChapter != null) MediaControl.skipToNext,
           if (active) _speedControl(reader!.speed),
-          if (active) _sleepControl(book?.byChapter ?? false),
+          if (active) _sleepControl(),
           if (active) MediaControl.stop,
         ],
         systemActions: {
@@ -206,6 +245,8 @@ class CarAudioHandler extends BaseAudioHandler {
           MediaAction.pause,
           MediaAction.playPause,
           MediaAction.playFromMediaId,
+          MediaAction.playFromSearch,
+          MediaAction.prepareFromSearch,
           MediaAction.rewind,
           MediaAction.stop,
           if (book?.nextChapter != null) MediaAction.skipToNext,
@@ -214,6 +255,8 @@ class CarAudioHandler extends BaseAudioHandler {
         androidCompactActionIndices: _compactIndices(book, active),
         processingState: error != null
             ? AudioProcessingState.error
+            : _loading
+            ? AudioProcessingState.loading
             : active
             ? AudioProcessingState.ready
             : AudioProcessingState.idle,
@@ -247,7 +290,7 @@ class CarAudioHandler extends BaseAudioHandler {
     name: 'speed',
   );
 
-  MediaControl _sleepControl(bool byChapter) {
+  MediaControl _sleepControl() {
     final step = _sleepStep;
     final label = step < 0
         ? 'Sleep timer off'
@@ -266,15 +309,76 @@ class CarAudioHandler extends BaseAudioHandler {
     _update();
   }
 
+  // Browsing
+
+  static MediaItem _folder(String id, String title) =>
+      MediaItem(id: id, title: title, playable: false);
+
+  static MediaItem _bookItem(CarBook b) {
+    final fraction = b.fraction;
+    return MediaItem(
+      id: carBookId(b.book.driveFileId),
+      title: b.title,
+      artist: b.author.isEmpty ? null : b.author,
+      displaySubtitle: [
+        if (b.author.isNotEmpty) b.author,
+        if (fraction != null && fraction > 0) '${(fraction * 100).round()}%',
+      ].join(' · '),
+      artUri: b.cover == null ? null : Uri.file(b.cover!.path),
+      playable: true,
+      extras: {
+        // Android Auto's progress bar under the cover.
+        if (fraction != null && fraction > 0) ...{
+          'android.media.extra.PLAYBACK_STATUS': 1,
+          'androidx.media.MediaItem.Extras.COMPLETION_PERCENTAGE': fraction,
+        },
+      },
+    );
+  }
+
+  static List<MediaItem> _books(List<CarBook> books) => [
+    for (final b in books)
+      if (canReadInCar(b.book.format)) _bookItem(b),
+  ];
+
   @override
   Future<List<MediaItem>> getChildren(
     String parentMediaId, [
     Map<String, dynamic>? options,
   ]) async {
+    final library = await car?.library();
     switch (parentMediaId) {
       case AudioService.browsableRootId:
+        if (library == null) {
+          // Signed out: only a book open on screen can play.
+          return [?_item()];
+        }
+        return [
+          _folder(carContinueId, 'Continue'),
+          _folder(carDownloadedId, 'Downloaded'),
+          if (library.collections().isNotEmpty)
+            _folder(carCollectionsId, 'Collections'),
+        ];
       case AudioService.recentRootId:
-        return [?_item()];
+        if (_item() case final item?) return [item];
+        final recent = library == null
+            ? const <MediaItem>[]
+            : _books(library.recent());
+        return recent.take(1).toList();
+      case carContinueId:
+        return library == null ? const [] : _books(library.recent());
+      case carDownloadedId:
+        return library == null ? const [] : _books(library.downloaded());
+      case carCollectionsId:
+        return [
+          for (final name in library?.collections() ?? const <String>[])
+            _folder('$_collectionPrefix$name', name),
+        ];
+    }
+    if (parentMediaId.startsWith(_collectionPrefix) && library != null) {
+      return _books(
+        library.inCollection(parentMediaId.substring(_collectionPrefix.length)),
+      );
     }
     return const [];
   }
@@ -282,18 +386,83 @@ class CarAudioHandler extends BaseAudioHandler {
   @override
   Future<MediaItem?> getMediaItem(String mediaId) async {
     final item = _item();
-    return item?.id == mediaId ? item : null;
+    if (item?.id == mediaId) return item;
+    if (!mediaId.startsWith(_bookPrefix)) return null;
+    final library = await car?.library();
+    final book = library?.byId(mediaId.substring(_bookPrefix.length));
+    return book == null ? null : _bookItem(book);
   }
+
+  @override
+  Future<List<MediaItem>> search(
+    String query, [
+    Map<String, dynamic>? extras,
+  ]) async {
+    final library = await car?.library();
+    return library == null ? const [] : _books(library.search(query));
+  }
+
+  // Playing
 
   @override
   Future<void> playFromMediaId(
     String mediaId, [
     Map<String, dynamic>? extras,
   ]) async {
-    if (_book?.id != mediaId) {
+    if (!mediaId.startsWith(_bookPrefix)) return;
+    final id = mediaId.substring(_bookPrefix.length);
+    if (_book?.id == id) return play();
+    await _playFromCar(id);
+  }
+
+  /// "Read Dune on My E-Reader": the best match in the library. An empty
+  /// query ("play My E-Reader") carries on with the last book.
+  @override
+  Future<void> playFromSearch(
+    String query, [
+    Map<String, dynamic>? extras,
+  ]) async {
+    if (query.trim().isEmpty) return play();
+    final library = await car?.library();
+    if (library == null) {
+      return _showError("Sign in on your phone when it's safe");
+    }
+    final found = [
+      for (final b in library.search(query))
+        if (canReadInCar(b.book.format)) b,
+    ];
+    if (found.isEmpty) {
+      return _showError('“$query” isn’t in your library');
+    }
+    await _playFromCar(found.first.book.driveFileId);
+  }
+
+  @override
+  Future<void> prepareFromSearch(
+    String query, [
+    Map<String, dynamic>? extras,
+  ]) async {}
+
+  Future<void> _playFromCar(String driveFileId) async {
+    final car = this.car;
+    if (car == null) {
       return _showError("Open the book on your phone when it's safe");
     }
-    await play();
+    _error = null;
+    _loading = true;
+    _update();
+    try {
+      await car.play(driveFileId);
+      _loading = false;
+      _update();
+    } on CarError catch (e) {
+      _loading = false;
+      _showError(e.message);
+    } catch (e) {
+      _loading = false;
+      debugPrint('Car playback failed: $e');
+      _showError('This book couldn’t be opened');
+    }
   }
 
   @override
@@ -301,7 +470,18 @@ class CarAudioHandler extends BaseAudioHandler {
     final reader = _reader;
     final book = _book;
     if (reader == null || book == null) {
-      return _showError("Open a book on your phone when it's safe");
+      // Nothing open: carry on with the book read last.
+      final last = (await car?.library())?.recent().where(
+        (b) => canReadInCar(b.book.format),
+      );
+      if (last != null && last.isNotEmpty) {
+        return _playFromCar(last.first.book.driveFileId);
+      }
+      return _showError(
+        car == null
+            ? "Open a book on your phone when it's safe"
+            : "Sign in on your phone when it's safe",
+      );
     }
     _error = null;
     if (reader.active) return reader.resume();

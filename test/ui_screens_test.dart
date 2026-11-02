@@ -29,7 +29,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class _FakeAuth implements DriveAuth {
   @override
-  Future<http.Client> signIn() async => http.Client();
+  Future<http.Client> signIn({bool quietly = false}) async => http.Client();
   @override
   Future<void> signOut() async {}
 }
