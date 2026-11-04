@@ -85,7 +85,7 @@ The reader page (`assets/reader/`) bundles [foliate-js](https://github.com/johnf
 1. Create a project at <https://console.cloud.google.com> and enable the **Google Drive API**.
 2. Under **OAuth consent screen**, choose *External*, add yourself as a test user, then press **Publish app** so it is *In production*. The app stays unverified, which is fine for personal use, and sign-ins no longer expire every 7 days as they do in *Testing*.
 3. Under **Credentials**, create OAuth client ids:
-   - **Web application**: needed by Android. Pass it as `GOOGLE_WEB_CLIENT_ID`.
+   - **Web application**: needed by Android. Put it in `lib/core/google_config.dart`, or pass it as `GOOGLE_WEB_CLIENT_ID` to override that.
    - **Android**: package `com.cubmask.ebook_reader` and the SHA-1 from `cd android && ./gradlew signingReport`.
    - **Desktop app**: for Windows. Pass it as `GOOGLE_DESKTOP_CLIENT_ID` and `GOOGLE_DESKTOP_CLIENT_SECRET`.
    - **iOS** (only for iPad/iPhone/macOS): bundle id `com.cubmask.ebookReader`; add `GIDClientID` and the reversed client id URL scheme to `ios/Runner/Info.plist` and `macos/Runner/Info.plist`.
@@ -95,12 +95,14 @@ The reader page (`assets/reader/`) bundles [foliate-js](https://github.com/johnf
 Enable Developer options and USB debugging on the tablet, connect it, then:
 
 ```sh
-flutter run --dart-define=GOOGLE_WEB_CLIENT_ID=<web-client-id>.apps.googleusercontent.com
+flutter run
 ```
+
+The Web application client id comes from `lib/core/google_config.dart`. Add `--dart-define=GOOGLE_WEB_CLIENT_ID=<web-client-id>.apps.googleusercontent.com` to use a different Cloud project.
 
 Every CI run also uploads a debug APK you can install directly on the tablet. For Google sign-in to work in that APK, set these once under the repository's **Settings → Secrets and variables → Actions**:
 
-- Variable `GOOGLE_WEB_CLIENT_ID`: the Web application client id.
+- Variable `GOOGLE_WEB_CLIENT_ID` (optional): a Web application client id that overrides the one in `lib/core/google_config.dart`.
 - Secret `DEBUG_KEYSTORE_BASE64`: your debug keystore, from `base64 -i ~/.android/debug.keystore` on a Mac (`base64 -w0 ~/.android/debug.keystore` on Linux). CI otherwise signs with a new key each run, whose SHA-1 never matches the Android client. Register this keystore's SHA-1 (`keytool -list -v -keystore ~/.android/debug.keystore -storepass android`) on the Android client.
 
 On first launch, sign in and paste the link to your books folder
