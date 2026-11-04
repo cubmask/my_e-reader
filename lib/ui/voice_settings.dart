@@ -4,6 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../reader/tts/cloud_voices.dart';
 import '../reader/tts/voice_pack.dart';
 import '../reader/tts/voice_store.dart';
+import 'with_text_controller.dart';
 
 const _samples = {
   'en': 'This is how I sound when I read your books aloud.',
@@ -227,46 +228,47 @@ class _OnlineVoices extends StatelessWidget {
   CloudVoiceSettings get cloud => voices.cloud;
 
   Future<void> _editKey(BuildContext context, CloudProvider provider) async {
-    final controller = TextEditingController(text: cloud.keyFor(provider));
     final key = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('${provider.label} API key'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: controller,
-              obscureText: true,
-              autocorrect: false,
-              enableSuggestions: false,
-              decoration: const InputDecoration(labelText: 'API key'),
-            ),
-            const SizedBox(height: 8),
-            TextButton.icon(
-              icon: const Icon(Icons.open_in_new, size: 18),
-              label: const Text('Get a key'),
-              onPressed: () => launchUrl(
-                Uri.parse(provider.keysUrl),
-                mode: LaunchMode.externalApplication,
+      builder: (context) => WithTextController(
+        text: cloud.keyFor(provider),
+        builder: (context, controller) => AlertDialog(
+          title: Text('${provider.label} API key'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: controller,
+                obscureText: true,
+                autocorrect: false,
+                enableSuggestions: false,
+                decoration: const InputDecoration(labelText: 'API key'),
               ),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                icon: const Icon(Icons.open_in_new, size: 18),
+                label: const Text('Get a key'),
+                onPressed: () => launchUrl(
+                  Uri.parse(provider.keysUrl),
+                  mode: LaunchMode.externalApplication,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, controller.text),
+              child: const Text('Save'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('Save'),
-          ),
-        ],
       ),
     );
-    controller.dispose();
     if (key != null) await cloud.setKey(provider, key);
   }
 

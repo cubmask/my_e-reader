@@ -19,6 +19,7 @@ import '../ui/breakpoints.dart';
 import '../ui/export_sheet.dart';
 import '../ui/theme.dart';
 import '../ui/voice_settings.dart';
+import '../ui/with_text_controller.dart';
 import 'appearance_sheet.dart';
 import 'ask.dart';
 import 'book_cache.dart';
@@ -1281,33 +1282,35 @@ class _ReaderScreenState extends State<ReaderScreen>
 
 /// Asks for note text; returns null when cancelled.
 Future<String?> _editNote(BuildContext context, String initial) {
-  final field = TextEditingController(text: initial);
   return showDialog<String>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('Note'),
-      content: SizedBox(
-        width: 480,
-        child: TextField(
-          controller: field,
-          autofocus: true,
-          minLines: 3,
-          maxLines: 8,
-          decoration: const InputDecoration(border: OutlineInputBorder()),
+    builder: (context) => WithTextController(
+      text: initial,
+      builder: (context, field) => AlertDialog(
+        title: const Text('Note'),
+        content: SizedBox(
+          width: 480,
+          child: TextField(
+            controller: field,
+            autofocus: true,
+            minLines: 3,
+            maxLines: 8,
+            decoration: const InputDecoration(border: OutlineInputBorder()),
+          ),
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(field.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(field.text.trim()),
-          child: const Text('Save'),
-        ),
-      ],
     ),
-  ).whenComplete(field.dispose);
+  );
 }
 
 sealed class _AnnotationAction {}

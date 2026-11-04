@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../reader/ask.dart';
+import 'with_text_controller.dart';
 
 /// Settings for asking about the page: the reader's own API key or Ollama
 /// server, the model, how much of the book goes with a question, and the
@@ -34,48 +35,49 @@ class _AskSettingsSectionState extends State<AskSettingsSection> {
     String? help,
     String? helpUrl,
   }) async {
-    final controller = TextEditingController(text: initial);
     final value = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: controller,
-              obscureText: secret,
-              autocorrect: false,
-              enableSuggestions: false,
-              decoration: InputDecoration(labelText: label),
-            ),
-            if (help != null && helpUrl != null) ...[
-              const SizedBox(height: 8),
-              TextButton.icon(
-                icon: const Icon(Icons.open_in_new, size: 18),
-                label: Text(help),
-                onPressed: () => launchUrl(
-                  Uri.parse(helpUrl),
-                  mode: LaunchMode.externalApplication,
-                ),
+      builder: (context) => WithTextController(
+        text: initial,
+        builder: (context, controller) => AlertDialog(
+          title: Text(title),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: controller,
+                obscureText: secret,
+                autocorrect: false,
+                enableSuggestions: false,
+                decoration: InputDecoration(labelText: label),
               ),
+              if (help != null && helpUrl != null) ...[
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  icon: const Icon(Icons.open_in_new, size: 18),
+                  label: Text(help),
+                  onPressed: () => launchUrl(
+                    Uri.parse(helpUrl),
+                    mode: LaunchMode.externalApplication,
+                  ),
+                ),
+              ],
             ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, controller.text),
+              child: const Text('Save'),
+            ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('Save'),
-          ),
-        ],
       ),
     );
-    controller.dispose();
     return value;
   }
 
