@@ -75,6 +75,29 @@ class PdfHighlighter {
     }
   }
 
+  /// The area [location] covers, in document coordinates, or null when its
+  /// pages aren't laid out or have no text.
+  Future<Rect?> documentRectOf(PdfTextLocation location) async {
+    Rect? area;
+    for (final r in location.ranges) {
+      if (!_controller.isReady) return null;
+      final layouts = _controller.layout.pageLayouts;
+      final pages = _controller.document.pages;
+      if (r.page < 1 || r.page > layouts.length || r.page > pages.length) {
+        continue;
+      }
+      final page = pages[r.page - 1];
+      if (_texts[r.page] == null) await _load(page);
+      final text = _texts[r.page];
+      if (text == null || !_controller.isReady) continue;
+      final pageRect = _controller.layout.pageLayouts[r.page - 1];
+      for (final rect in _rects(text, r.start, r.end, page, pageRect)) {
+        area = area?.expandToInclude(rect) ?? rect;
+      }
+    }
+    return area;
+  }
+
   /// The highlight under [position], in document coordinates.
   PdfTextLocation? hitTest(Offset position) {
     if (!_controller.isReady) return null;

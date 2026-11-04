@@ -72,9 +72,10 @@ class WebBookController {
   /// Searches the book; matches arrive through [WebBookSearch].
   late final search = WebBookSearch(this);
 
-  Future<List<SpeechSegment>?> _tts(String fn) async {
+  Future<List<SpeechSegment>?> _tts(String fn, [String? from]) async {
     final result = await _web?.callAsyncJavaScript(
-      functionBody: 'return await window.reader.$fn()',
+      functionBody: 'return await window.reader.$fn(from)',
+      arguments: {'from': from},
     );
     final value = result?.value;
     if (value is! List) return null;
@@ -85,17 +86,21 @@ class WebBookController {
   }
 }
 
-/// Reads the open web book aloud, highlighting each sentence.
+/// Reads the open web book aloud, highlighting each sentence and keeping
+/// it on screen.
 class WebSpeechSource implements SpeechSource {
-  WebSpeechSource(this._controller);
+  /// Starts at the top of the page in view, or at the sentence holding
+  /// [from], a CFI such as the selected text's.
+  WebSpeechSource(this._controller, {this.from});
 
   final WebBookController _controller;
+  final String? from;
 
   @override
   String? get language => _controller.language;
 
   @override
-  Future<List<SpeechSegment>?> start() => _controller._tts('ttsStart');
+  Future<List<SpeechSegment>?> start() => _controller._tts('ttsStart', from);
 
   @override
   Future<List<SpeechSegment>?> next() => _controller._tts('ttsNext');
