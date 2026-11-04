@@ -213,6 +213,32 @@ void main() {
     expect(find.text('Eleven v4 (best for audiobooks)'), findsOneWidget);
   });
 
+  testWidgets('saves an API key typed into the dialog', (tester) async {
+    late VoiceStore voices;
+    await tester.runAsync(() async {
+      voices = store(MockClient((_) async => http.Response('', 404)));
+      await voices.load();
+      await voices.cloud.setProvider(CloudProvider.azure);
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(child: VoiceSettings(voices: voices)),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Add'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'azure-key');
+    await tester.tap(find.text('Save'));
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    // The dialog's closing animation still builds its text field.
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(voices.cloud.keyFor(CloudProvider.azure), 'azure-key');
+    expect(find.text('Saved in this device\'s secure storage'), findsOneWidget);
+  });
+
   test('reads online when set up, offline once that fails', () async {
     final bytes = _modelArchive();
     var online = true;

@@ -11,6 +11,7 @@ import 'book_cover.dart';
 import 'book_sheet.dart';
 import 'breakpoints.dart';
 import 'duplicates_screen.dart';
+import 'with_text_controller.dart';
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key, required this.controller});
@@ -331,33 +332,34 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _manageCollection(BookMetaStore meta, String name) async {
-    final field = TextEditingController(text: name);
     final result = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Collection'),
-        content: TextField(
-          controller: field,
-          autofocus: true,
-          decoration: const InputDecoration(labelText: 'Name'),
+      builder: (context) => WithTextController(
+        text: name,
+        builder: (context, field) => AlertDialog(
+          title: const Text('Collection'),
+          content: TextField(
+            controller: field,
+            autofocus: true,
+            decoration: const InputDecoration(labelText: 'Name'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, ''),
+              child: const Text('Delete'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, field.text),
+              child: const Text('Rename'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, ''),
-            child: const Text('Delete'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, field.text),
-            child: const Text('Rename'),
-          ),
-        ],
       ),
     );
-    field.dispose();
     if (result == null) return;
     // Deleting a collection only removes the grouping, not the books.
     await meta.renameCollection(name, result);
