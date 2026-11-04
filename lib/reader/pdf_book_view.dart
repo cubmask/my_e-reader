@@ -252,8 +252,8 @@ class PdfSpeechSource implements SpeechSource {
     required PdfPage Function(int number) page,
     required this._startPage,
     required this._turnTo,
-    PdfTextLocation? this._from,
-    void Function(PdfTextLocation? location)? this._onSpoken,
+    this._from,
+    this._onSpoken,
   }) : _pageOf = page;
 
   final int Function() _pageCount;
