@@ -6,6 +6,8 @@ import 'package:googleapis_auth/auth_io.dart' as auth;
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
+import '../core/google_config.dart';
+
 /// Read the books folder and delete books from it, read/write sync data in
 /// the hidden app folder, and create (then delete) the temporary Google Docs
 /// copies used to convert office documents.
@@ -31,7 +33,7 @@ abstract interface class DriveAuth {
 class MobileDriveAuth implements DriveAuth {
   /// The "Web application" OAuth client id; Android requires it as the server
   /// client id when no google-services.json is used.
-  static const _serverClientId = String.fromEnvironment('GOOGLE_WEB_CLIENT_ID');
+  static const _serverClientId = googleWebClientId;
 
   bool _initialized = false;
 
@@ -39,7 +41,8 @@ class MobileDriveAuth implements DriveAuth {
   Future<http.Client> signIn({bool quietly = false}) async {
     if (Platform.isAndroid && _serverClientId.isEmpty) {
       throw StateError(
-        'Build with --dart-define=GOOGLE_WEB_CLIENT_ID=... (see README).',
+        'No Google client id: set googleWebClientId in '
+        'lib/core/google_config.dart (see README).',
       );
     }
     final signIn = GoogleSignIn.instance;
