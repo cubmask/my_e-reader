@@ -83,4 +83,10 @@ void main() {
     final found = locateSentences(page, ['Yes.', 'No.', 'Yes.']);
     expect([for (final f in found) f!.start], [0, 5, 9]);
   });
+
+  test('a sentence with no letters is not looked for', () {
+    final found = locateSentences('Act I. — Scene 2.', ['—', 'Scene 2.']);
+    expect(found[0], isNull);
+    expect(found[1], (start: 9, end: 17));
+  });
 }
