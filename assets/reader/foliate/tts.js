@@ -260,12 +260,17 @@ export class TTS {
         this.#lastMark = null
         const [doc] = this.#list.find(range_ =>
             range.compareBoundaryPoints(Range.END_TO_START, range_) <= 0)
+        // The sentence holding the start of `range`, so reading starts with
+        // the words the reader is looking at rather than skipping ahead
+        // (or, past the block's last mark, back to the block's start).
         let mark
-        for (const [name, range_] of this.#ranges.entries())
-            if (range.compareBoundaryPoints(Range.START_TO_START, range_) <= 0) {
-                mark = name
+        for (const [name, range_] of this.#ranges.entries()) {
+            if (range_.compareBoundaryPoints(Range.START_TO_START, range) <= 0) mark = name
+            else {
+                mark ??= name
                 break
             }
+        }
         return this.#speak(doc, ssml => this.#getMarkElement(ssml, mark))
     }
     setMark(mark) {

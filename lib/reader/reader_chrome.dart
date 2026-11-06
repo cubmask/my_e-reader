@@ -224,7 +224,7 @@ class SelectionPopover extends StatelessWidget {
             ink: ink,
             item: ToolbarItem(
               icon: Icons.volume_up_outlined,
-              tooltip: 'Read aloud',
+              tooltip: 'Read aloud from here',
               selected: true,
               onPressed: onReadAloud,
             ),

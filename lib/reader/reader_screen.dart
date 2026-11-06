@@ -75,6 +75,16 @@ class _ReaderScreenState extends State<ReaderScreen>
           (location: location, color: highlightSwatches[a.color]!),
     ],
   );
+
+  /// The PDF sentence being read aloud, drawn by [_pdfSpokenHighlighter].
+  PdfTextLocation? _spoken;
+  late final _pdfSpokenHighlighter = PdfHighlighter(
+    _pdf,
+    () => [
+      if (_spoken case final spoken?)
+        (location: spoken, color: AppColors.coral),
+    ],
+  );
   File? _file;
 
   /// Set instead of [_file] when a PDF is paged in straight from Drive.
@@ -547,12 +557,50 @@ class _ReaderScreenState extends State<ReaderScreen>
     await _startReadAloud();
   }
 
-  Future<void> _startReadAloud() async {
+  /// Reads aloud from the page in view, or from [from], the location of
+  /// the selected text, on to the end of the book.
+  Future<void> _startReadAloud({String? from}) async {
     if (!_ready || !mounted) return;
     setState(() => _controls = true);
     await BackgroundAudio.instance.attach(_readAloud, _nowReading());
     await _readAloud.play(
-      _isPdf ? PdfSpeechSource(_pdf) : WebSpeechSource(_web),
+      _isPdf
+          ? PdfSpeechSource(
+              _pdf,
+              from: from == null ? null : PdfTextLocation.parse(from),
+              onSpoken: _showSpoken,
+            )
+          : WebSpeechSource(_web, from: from),
+    );
+  }
+
+  /// Highlights the PDF sentence being read and keeps it on screen.
+  Future<void> _showSpoken(PdfTextLocation? location) async {
+    _spoken = location;
+    if (!mounted || !_pdf.isReady) return;
+    _pdf.invalidate();
+    if (location == null) return;
+    final area = await _pdfSpokenHighlighter.documentRectOf(location);
+    if (!mounted || !_pdf.isReady || !identical(_spoken, location)) return;
+    if (area == null) {
+      // No text layer to place it by: show its page at least.
+      final page = location.ranges.first.page;
+      if (_pdf.pageNumber != page) await _pdf.goToPage(pageNumber: page);
+      return;
+    }
+    final visible = _pdf.visibleRect;
+    if (visible.contains(area.topLeft) && visible.contains(area.bottomRight)) {
+      return;
+    }
+    // Brings the start of a long sentence into view without zooming out.
+    await _pdf.ensureVisible(
+      Rect.fromLTWH(
+        area.left,
+        area.top,
+        math.min(area.width, visible.width * 0.9),
+        math.min(area.height, visible.height * 0.7),
+      ),
+      margin: 24,
     );
   }
 
@@ -729,6 +777,7 @@ class _ReaderScreenState extends State<ReaderScreen>
           bookId: book.driveFileId,
           paintSearch: _paintPdfSearch,
           highlighter: _pdfHighlighter,
+          spoken: _pdfSpokenHighlighter,
           onSelection: (selection) => setState(
             () => _selection = selection == null
                 ? null
@@ -947,10 +996,8 @@ class _ReaderScreenState extends State<ReaderScreen>
             _selection = null;
             _controls = true;
           });
-          await BackgroundAudio.instance.attach(_readAloud, _nowReading());
-          await _readAloud.play(
-            PassageSpeechSource(selection.text, language: _web.language),
-          );
+          // Reads on from the start of the selection, not just the passage.
+          await _startReadAloud(from: selection.cfi);
         },
         onHighlight: _highlight,
         onNote: _highlightWithNote,

@@ -196,8 +196,49 @@ const toSegments = ssml => {
     return segments
 }
 
+// The sentence being read aloud is drawn on the page's overlay under this
+// key, apart from the reader's own highlights.
+const SPOKEN = 'reader-tts-spoken'
+let spokenOn = null
+
+const drawSpoken = (rects, { color }) => {
+    const g = document.createElementNS('http://www.w3.org/2000/svg', 'g')
+    g.append(Overlayer.highlight(rects, { color }), Overlayer.underline(rects, { color, width: 2 }))
+    return g
+}
+
+const clearSpoken = () => {
+    spokenOn?.remove(SPOKEN)
+    spokenOn = null
+}
+
+// Whether any of `range` is on screen now.
+const inView = range => {
+    const visible = view.lastLocation?.range
+    if (!visible) return false
+    try {
+        const start = visible.comparePoint(range.startContainer, range.startOffset)
+        const end = visible.comparePoint(range.endContainer, range.endOffset)
+        return start === 0 || end === 0 || (start < 0 && end > 0)
+    } catch {
+        // In another section.
+        return false
+    }
+}
+
+// Highlights the sentence being read and turns to it (or scrolls it into
+// view) once it is no longer on screen. Doesn't use the text selection,
+// which Android's WebView may not draw and which brings up the
+// selection handles.
 const highlightSpoken = range => {
-    view.renderer.scrollToAnchor(range, true)
+    const doc = range.startContainer.ownerDocument
+    const contents = view.renderer.getContents().find(c => c.doc === doc)
+    clearSpoken()
+    if (contents?.overlayer) {
+        contents.overlayer.add(SPOKEN, range, drawSpoken, { color: colors().link })
+        spokenOn = contents.overlayer
+    }
+    if (!inView(range)) view.renderer.scrollToAnchor(range)
 }
 
 const initTTS = () => view.initTTS('sentence', highlightSpoken)
@@ -227,7 +268,7 @@ window.reader = {
             view.addEventListener('draw-annotation', ({ detail: { draw, annotation } }) =>
                 draw(Overlayer.highlight, { color: highlightColors[annotation.color] ?? annotation.color }))
             view.addEventListener('show-annotation', ({ detail: { value } }) =>
-                send('annotationTapped', { cfi: value }))
+                value !== SPOKEN && send('annotationTapped', { cfi: value }))
             for (const a of annotations_ ?? []) annotations.set(a.cfi, a.color)
             view.addEventListener('relocate', ({ detail }) => detail.fraction != null && send('relocate', {
                 cfi: detail.cfi ?? '',
@@ -293,10 +334,23 @@ window.reader = {
     clearSelection: () => view?.renderer.getContents().forEach(({ doc }) => doc.getSelection()?.removeAllRanges()),
     // Text-to-speech: each call returns the next block as [{ mark, text }],
     // or null at the end of the book.
-    async ttsStart() {
+    // Starts with the sentence at the top of the page in view, or the one
+    // holding `from`, a CFI such as the selected text's.
+    async ttsStart(from) {
         speaking = true
         await initTTS()
-        const range = view.lastLocation?.range
+        let range = view.lastLocation?.range
+        if (from) {
+            const { index, doc } = view.renderer.getContents()[0] ?? {}
+            const target = view.resolveNavigation(from)
+            if (doc && target?.index === index) {
+                try {
+                    range = target.anchor(doc) ?? range
+                } catch {
+                    // Not in this section after all: read from the page.
+                }
+            }
+        }
         return toSegments(range ? view.tts.from(range) : view.tts.start())
     },
     async ttsNext() {
@@ -313,6 +367,7 @@ window.reader = {
     ttsMark: mark => view?.tts?.setMark(mark),
     ttsStop() {
         speaking = false
+        clearSpoken()
         view?.renderer.getContents().forEach(({ doc }) => doc.getSelection()?.removeAllRanges())
     },
     // Searches the whole book, reporting matches section by section so the
